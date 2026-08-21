@@ -1,8 +1,9 @@
-"""Tests for the generate_all() episode generation pipeline.
+"""Tests for the episode generation pipeline and queue operations.
 
-Focus is state transitions and per-episode error isolation. Real clients are
-built on httpx.MockTransport (Wallabag + Kokoro) and measure_duration is
-monkeypatched so no real MP3 files are needed.
+Focus is state transitions and per-episode error isolation for generate_all(),
+plus the add_random / remove_item / archive_completed / clear_queue / stats
+queue operations. Real clients are built on httpx.MockTransport (Wallabag +
+Kokoro) and measure_duration is monkeypatched so no real MP3 files are needed.
 """
 
 import json
@@ -12,9 +13,16 @@ import httpx
 import pytest
 
 from app.config import Settings, get_settings
-from app.db import get_db_path, init_db
+from app.db import add_processed_article, get_db_path, init_db
 from app.kokoro import KokoroClient
-from app.pipeline import generate_all
+from app.pipeline import (
+    add_random,
+    archive_completed,
+    clear_queue,
+    generate_all,
+    remove_item,
+    stats,
+)
 from app.wallabag import WallabagClient
 
 _REQUIRED_ENV = {
@@ -137,6 +145,68 @@ def _episode_rows(conn: sqlite3.Connection) -> list[dict]:
 
 def _processed_ids(conn: sqlite3.Connection) -> list[int]:
     return [row[0] for row in conn.execute("SELECT wallabag_id FROM processed_articles")]
+
+
+def _meta_item(
+    entry_id: int,
+    title: str | None = None,
+    tags: list[str] | None = None,
+    reading_time: int = 5,
+) -> dict:
+    """A Wallabag metadata payload item (as returned by list_unread_metadata)."""
+    return {
+        "id": entry_id,
+        "title": title or f"Article {entry_id}",
+        "url": f"https://example.com/{entry_id}",
+        "domain_name": "example.com",
+        "reading_time": reading_time,
+        "language": "en",
+        "tags": tags or [],
+        "is_archived": 0,
+        "is_starred": 0,
+    }
+
+
+def _metadata_handler(items: list[dict]):
+    """MockTransport handler serving the entries.json metadata endpoint."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/oauth/v2/token":
+            return httpx.Response(200, json=_token_response())
+        if request.url.path == "/api/entries.json":
+            return httpx.Response(200, json={"_embedded": {"items": items}, "pages": 1})
+        return httpx.Response(404)
+
+    return handler
+
+
+def _insert_episode(
+    conn: sqlite3.Connection,
+    wallabag_id: int,
+    title: str,
+    status: str = "staged",
+    est_minutes: int = 5,
+    duration_sec: int | None = None,
+    drive_id: int | None = None,
+) -> int:
+    """Insert an episode with the given status; return its id."""
+    cur = conn.execute(
+        "INSERT INTO episodes (wallabag_id, title, source, url, status, "
+        "est_minutes, language, duration_sec, drive_id, created_at) "
+        "VALUES (?, ?, ?, ?, ?, ?, 'en', ?, ?, '2026-01-01T00:00:00+00:00')",
+        (
+            wallabag_id,
+            title,
+            f"example.com/{wallabag_id}",
+            f"https://example.com/{wallabag_id}",
+            status,
+            est_minutes,
+            duration_sec,
+            drive_id,
+        ),
+    )
+    conn.commit()
+    return int(cur.lastrowid)
 
 
 async def test_happy_path(env, monkeypatch):
@@ -308,3 +378,232 @@ async def test_no_staged_episodes_returns_empty_summary(env, monkeypatch):
     summary = await generate_all(wallabag, kokoro, settings=get_settings())
 
     assert summary == {"total": 0, "done": 0, "failed": 0, "skipped": 0}
+
+
+# ---------------------------------------------------------------------------
+# Queue operations: add_random
+# ---------------------------------------------------------------------------
+
+
+def _staged_wallabag_ids(conn: sqlite3.Connection) -> list[int]:
+    rows = conn.execute(
+        "SELECT wallabag_id FROM episodes WHERE status='staged' ORDER BY wallabag_id"
+    ).fetchall()
+    return [row[0] for row in rows]
+
+
+async def test_add_random_basic(env, monkeypatch):
+    # Deterministic pick: first k candidates.
+    monkeypatch.setattr("app.pipeline.random.sample", lambda pop, k: pop[:k])
+    wallabag = _make_wallabag(
+        _metadata_handler([_meta_item(i) for i in range(1, 6)])
+    )
+
+    count = await add_random(3, wallabag, settings=get_settings())
+
+    assert count == 3
+    with sqlite3.connect(get_db_path()) as conn:
+        assert _staged_wallabag_ids(conn) == [1, 2, 3]
+        rows = conn.execute(
+            "SELECT wallabag_id, title, source, url, est_minutes, language "
+            "FROM episodes WHERE status='staged' ORDER BY id"
+        ).fetchall()
+        assert all(r[0] == i + 1 for i, r in enumerate(rows))
+        assert all(r[1] == f"Article {r[0]}" for r in rows)
+        assert all(r[2] == "example.com" for r in rows)
+        assert all(r[3] == f"https://example.com/{r[0]}" for r in rows)
+        assert all(r[4] == 5 for r in rows)
+        assert all(r[5] == "en" for r in rows)
+
+
+async def test_add_random_excludes_tagged(env):
+    items = [
+        _meta_item(1, tags=["computer"]),
+        _meta_item(2, tags=["tech", "computer"]),
+        _meta_item(3, tags=["tech"]),
+        _meta_item(4, tags=[]),
+        _meta_item(5, tags=["news"]),
+    ]
+    wallabag = _make_wallabag(_metadata_handler(items))
+
+    count = await add_random(10, wallabag, settings=_settings(EXCLUDE_TAGS=["computer"]))
+
+    assert count == 3
+    with sqlite3.connect(get_db_path()) as conn:
+        assert _staged_wallabag_ids(conn) == [3, 4, 5]
+
+
+async def test_add_random_dedupes_processed_and_staged(env):
+    with sqlite3.connect(get_db_path()) as conn:
+        add_processed_article(conn, 1, 999)
+        _insert_staged(conn, [(2, "Already Staged")])
+
+    wallabag = _make_wallabag(_metadata_handler([_meta_item(i) for i in range(1, 6)]))
+
+    count = await add_random(10, wallabag, settings=get_settings())
+
+    assert count == 3
+    with sqlite3.connect(get_db_path()) as conn:
+        # id=2 was pre-staged (kept); id=1 excluded (processed); 3,4,5 newly staged
+        assert _staged_wallabag_ids(conn) == [2, 3, 4, 5]
+
+
+async def test_add_random_fewer_candidates_than_n(env):
+    wallabag = _make_wallabag(_metadata_handler([_meta_item(1), _meta_item(2)]))
+
+    count = await add_random(10, wallabag, settings=get_settings())
+
+    assert count == 2
+    with sqlite3.connect(get_db_path()) as conn:
+        assert _staged_wallabag_ids(conn) == [1, 2]
+
+
+async def test_add_random_uses_random_sample(env, monkeypatch):
+    picked = []
+
+    def fake_sample(pop, k):
+        picked.append((pop, k))
+        return pop[:k]
+
+    monkeypatch.setattr("app.pipeline.random.sample", fake_sample)
+    wallabag = _make_wallabag(_metadata_handler([_meta_item(i) for i in range(1, 6)]))
+
+    count = await add_random(3, wallabag, settings=get_settings())
+
+    assert count == 3
+    assert len(picked) == 1
+    population, k = picked[0]
+    assert k == 3
+    assert [m.id for m in population] == [1, 2, 3, 4, 5]
+    with sqlite3.connect(get_db_path()) as conn:
+        assert _staged_wallabag_ids(conn) == [1, 2, 3]
+
+
+async def test_add_random_idempotent(env, monkeypatch):
+    monkeypatch.setattr("app.pipeline.random.sample", lambda pop, k: pop[:k])
+    wallabag = _make_wallabag(_metadata_handler([_meta_item(i) for i in range(1, 6)]))
+
+    first = await add_random(3, wallabag, settings=get_settings())
+    second = await add_random(3, wallabag, settings=get_settings())
+
+    assert first == 3
+    assert second == 2
+    with sqlite3.connect(get_db_path()) as conn:
+        assert _staged_wallabag_ids(conn) == [1, 2, 3, 4, 5]
+
+
+# ---------------------------------------------------------------------------
+# Queue operations: remove_item
+# ---------------------------------------------------------------------------
+
+
+def test_remove_item_staged(env):
+    with sqlite3.connect(get_db_path()) as conn:
+        episode_id = _insert_episode(conn, 1, "Article One", status="staged")
+
+    remove_item(episode_id)
+
+    with sqlite3.connect(get_db_path()) as conn:
+        row = conn.execute("SELECT id FROM episodes WHERE id=?", (episode_id,)).fetchone()
+        assert row is None
+
+
+def test_remove_item_failed(env):
+    with sqlite3.connect(get_db_path()) as conn:
+        episode_id = _insert_episode(conn, 1, "Article One", status="failed")
+
+    remove_item(episode_id)
+
+    with sqlite3.connect(get_db_path()) as conn:
+        row = conn.execute("SELECT id FROM episodes WHERE id=?", (episode_id,)).fetchone()
+        assert row is None
+
+
+def test_remove_item_done_raises(env):
+    with sqlite3.connect(get_db_path()) as conn:
+        episode_id = _insert_episode(
+            conn, 1, "Article One", status="done", duration_sec=60, drive_id=1
+        )
+
+    with pytest.raises(ValueError, match="'done'"):
+        remove_item(episode_id)
+
+    with sqlite3.connect(get_db_path()) as conn:
+        row = conn.execute("SELECT status FROM episodes WHERE id=?", (episode_id,)).fetchone()
+        assert row[0] == "done"
+
+
+def test_remove_item_missing_raises(env):
+    with pytest.raises(ValueError, match="not found"):
+        remove_item(999)
+
+
+# ---------------------------------------------------------------------------
+# Queue operations: archive_completed / clear_queue / stats
+# ---------------------------------------------------------------------------
+
+
+def test_archive_completed(env):
+    with sqlite3.connect(get_db_path()) as conn:
+        for wallabag_id in (1, 2, 3):
+            _insert_episode(
+                conn, wallabag_id, f"Article {wallabag_id}",
+                status="done", duration_sec=60, drive_id=1,
+            )
+        for wallabag_id in (4, 5):
+            _insert_episode(conn, wallabag_id, f"Article {wallabag_id}", status="staged")
+
+    assert archive_completed() == 3
+
+    with sqlite3.connect(get_db_path()) as conn:
+        statuses = conn.execute("SELECT status FROM episodes ORDER BY id").fetchall()
+        assert [s[0] for s in statuses] == ["archived", "archived", "archived", "staged", "staged"]
+
+
+def test_clear_queue(env):
+    with sqlite3.connect(get_db_path()) as conn:
+        _insert_episode(conn, 1, "Article One", status="staged")
+        _insert_episode(conn, 2, "Article Two", status="staged")
+        _insert_episode(conn, 3, "Article Three", status="failed")
+        _insert_episode(conn, 4, "Article Four", status="done", duration_sec=60, drive_id=1)
+        _insert_episode(conn, 5, "Article Five", status="done", duration_sec=60, drive_id=1)
+
+    assert clear_queue() == 3
+
+    with sqlite3.connect(get_db_path()) as conn:
+        rows = conn.execute("SELECT wallabag_id, status FROM episodes ORDER BY id").fetchall()
+        assert [(r[0], r[1]) for r in rows] == [(4, "done"), (5, "done")]
+
+
+def test_stats(env):
+    with sqlite3.connect(get_db_path()) as conn:
+        _insert_episode(conn, 1, "Article One", status="staged", est_minutes=5)
+        _insert_episode(conn, 2, "Article Two", status="staged", est_minutes=10)
+        _insert_episode(
+            conn, 3, "Article Three", status="done", est_minutes=5,
+            duration_sec=120, drive_id=7,
+        )
+
+    assert stats() == {
+        "total_minutes": 17,
+        "articles": 3,
+        "staged": 2,
+        "done": 1,
+        "failed": 0,
+        "generating": 0,
+        "archived": 0,
+        "drive_id": 7,
+    }
+
+
+def test_stats_empty_queue(env):
+    assert stats() == {
+        "total_minutes": 0,
+        "articles": 0,
+        "staged": 0,
+        "done": 0,
+        "failed": 0,
+        "generating": 0,
+        "archived": 0,
+        "drive_id": None,
+    }

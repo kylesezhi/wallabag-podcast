@@ -1,23 +1,36 @@
-"""Queue orchestration: the ``generate_all()`` episode generation flow.
+"""Queue orchestration: article selection, queue operations, and generation.
 
-Walks every ``staged`` episode and produces one MP3 per article: fetch the
-full Wallabag entry, clean the HTML into TTS input, synthesize with Kokoro,
-write the audio under ``DATA_DIR/audio/{id}.mp3``, measure its duration, and
-mark the episode ``done`` (recording a processed_articles row). Failures are
-isolated per episode: a bad article marks that episode ``failed`` and the run
-continues with the next one.
+- ``add_random`` pulls unread Wallabag metadata, filters exclusions, and
+  stages N random episodes.
+- ``remove_item`` / ``archive_completed`` / ``clear_queue`` manage the queue.
+- ``stats`` summarizes the queue for the UI.
+- ``generate_all()`` produces one MP3 per staged episode: fetch the full
+  Wallabag entry, clean the HTML into TTS input, synthesize with Kokoro,
+  write the audio under ``DATA_DIR/audio/{id}.mp3``, measure its duration, and
+  mark the episode ``done`` (recording a processed_articles row). Failures are
+  isolated per episode: a bad article marks that episode ``failed`` and the run
+  continues with the next one.
 """
 
 from __future__ import annotations
 
 import logging
+import random
 import sqlite3
 
 from .config import Settings, get_settings
 from .db import (
     add_processed_article,
+    archive_done_episodes,
     connect,
+    delete_episode,
+    delete_staged_failed_episodes,
+    get_episode_status,
+    get_processed_wallabag_ids,
     get_staged_episodes,
+    get_staged_wallabag_ids,
+    get_stats_rows,
+    insert_staged_episode,
     next_drive_id,
     set_episode_done,
     set_episode_failed,
@@ -28,6 +41,128 @@ from .textclean import SkipArticle, build_tts_input_from_article
 from .wallabag import WallabagClient, WallabagError
 
 logger = logging.getLogger(__name__)
+
+
+async def add_random(
+    n: int,
+    wallabag_client: WallabagClient,
+    settings: Settings | None = None,
+) -> int:
+    """Fetch unread Wallabag metadata, filter exclusions + already-known
+    articles, pick ``n`` at random, and insert them as ``staged`` episodes.
+
+    An article is excluded if any of its tags is in ``settings.EXCLUDE_TAGS``
+    (case-insensitive) or if its wallabag_id is already known — either in
+    ``processed_articles`` (successfully generated before) or on any existing
+    episode row. Returns the number actually staged (may be < n).
+    """
+    settings = settings or get_settings()
+    exclude = {tag.lower() for tag in settings.EXCLUDE_TAGS}
+    if n <= 0:
+        return 0
+
+    conn = connect()
+    try:
+        # Already-known wallabag_ids: processed before OR already in the queue.
+        existing = get_staged_wallabag_ids(conn) | get_processed_wallabag_ids(conn)
+
+        metas = await wallabag_client.list_unread_metadata()
+
+        candidates = [
+            m
+            for m in metas
+            if m.id not in existing and not (set(m.tags) & exclude)
+        ]
+
+        if len(candidates) <= n:
+            chosen = candidates
+        else:
+            chosen = random.sample(candidates, n)
+
+        count = 0
+        for m in chosen:
+            insert_staged_episode(
+                conn, m.id, m.title, m.domain_name, m.url, m.reading_time, m.language
+            )
+            count += 1
+        return count
+    finally:
+        conn.close()
+
+
+def remove_item(episode_id: int) -> None:
+    """Delete a staged|failed episode.
+
+    Does NOT touch processed_articles: removing a staged/failed item lets it
+    be re-picked later. Raises ValueError if the episode is not staged|failed.
+    """
+    conn = connect()
+    try:
+        rowcount = delete_episode(conn, episode_id)
+        if rowcount == 0:
+            status = get_episode_status(conn, episode_id)
+            if status is None:
+                raise ValueError(f"Episode {episode_id} not found")
+            raise ValueError(
+                f"Episode {episode_id} is '{status}', cannot remove "
+                "(only staged|failed)"
+            )
+    finally:
+        conn.close()
+
+
+def archive_completed() -> int:
+    """Set status done->archived for all done episodes. Returns count archived.
+
+    Audio stays on disk and processed_articles rows are untouched.
+    """
+    conn = connect()
+    try:
+        return archive_done_episodes(conn)
+    finally:
+        conn.close()
+
+
+def clear_queue() -> int:
+    """Delete staged|failed episodes. Returns count deleted.
+
+    Does NOT touch done/archived episodes or their processed_articles rows.
+    """
+    conn = connect()
+    try:
+        return delete_staged_failed_episodes(conn)
+    finally:
+        conn.close()
+
+
+def stats() -> dict:
+    """Return queue statistics: minutes, article count, status counts, drive_id.
+
+    ``total_minutes`` = sum(est_minutes for staged) + sum(duration_sec // 60
+    for done). ``articles`` counts the active queue (staged + done + failed +
+    generating, excluding archived). ``drive_id`` is the most recent done
+    episode's drive_id, or None.
+    """
+    conn = connect()
+    try:
+        rows = get_stats_rows(conn)
+        counts = rows["status_counts"]
+        staged = int(counts.get("staged", 0))
+        done = int(counts.get("done", 0))
+        failed = int(counts.get("failed", 0))
+        generating = int(counts.get("generating", 0))
+        return {
+            "total_minutes": rows["staged_minutes"] + rows["done_seconds"] // 60,
+            "articles": staged + done + failed + generating,
+            "staged": staged,
+            "done": done,
+            "failed": failed,
+            "generating": generating,
+            "archived": int(counts.get("archived", 0)),
+            "drive_id": rows["done_drive_id"],
+        }
+    finally:
+        conn.close()
 
 
 def _resolve_voice(conn: sqlite3.Connection, settings: Settings) -> str:

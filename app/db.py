@@ -161,3 +161,103 @@ def next_drive_id(conn: sqlite3.Connection) -> int:
     """Return ``max(drive_id) + 1``, or 1 when no episode has a drive_id yet."""
     row = conn.execute("SELECT COALESCE(MAX(drive_id), 0) + 1 FROM episodes").fetchone()
     return int(row[0])
+
+
+def get_processed_wallabag_ids(conn: sqlite3.Connection) -> set[int]:
+    """Return the wallabag_ids recorded in processed_articles (dedupe index)."""
+    return {
+        row[0]
+        for row in conn.execute("SELECT wallabag_id FROM processed_articles")
+        if row[0] is not None
+    }
+
+
+def get_staged_wallabag_ids(conn: sqlite3.Connection) -> set[int]:
+    """Return the wallabag_ids that already have an episode row.
+
+    Any status (staged/generating/done/failed/archived) counts, so an article
+    that has ever entered the queue is not re-staged by add_random().
+    """
+    return {
+        row[0]
+        for row in conn.execute(
+            "SELECT wallabag_id FROM episodes WHERE status IN "
+            "('staged','generating','done','failed','archived')"
+        )
+        if row[0] is not None
+    }
+
+
+def insert_staged_episode(
+    conn: sqlite3.Connection,
+    wallabag_id: int,
+    title: str,
+    source: str,
+    url: str,
+    est_minutes: int,
+    language: str | None,
+) -> None:
+    """Insert a new staged episode (``INSERT OR IGNORE`` on wallabag_id)."""
+    conn.execute(
+        "INSERT OR IGNORE INTO episodes (wallabag_id, title, source, url, status, "
+        "est_minutes, language, created_at) VALUES (?, ?, ?, ?, 'staged', ?, ?, ?)",
+        (wallabag_id, title, source, url, est_minutes, language, _now_iso()),
+    )
+    conn.commit()
+
+
+def delete_episode(conn: sqlite3.Connection, episode_id: int) -> int:
+    """Delete a staged|failed episode by id. Return rowcount (0 or 1)."""
+    cur = conn.execute(
+        "DELETE FROM episodes WHERE id=? AND status IN ('staged','failed')",
+        (episode_id,),
+    )
+    conn.commit()
+    return cur.rowcount
+
+
+def archive_done_episodes(conn: sqlite3.Connection) -> int:
+    """Set status done->archived for all done episodes. Return rowcount."""
+    cur = conn.execute("UPDATE episodes SET status='archived' WHERE status='done'")
+    conn.commit()
+    return cur.rowcount
+
+
+def delete_staged_failed_episodes(conn: sqlite3.Connection) -> int:
+    """Delete all staged|failed episodes. Return rowcount."""
+    cur = conn.execute("DELETE FROM episodes WHERE status IN ('staged','failed')")
+    conn.commit()
+    return cur.rowcount
+
+
+def get_episode_status(conn: sqlite3.Connection, episode_id: int) -> str | None:
+    """Return the episode's status, or None if no such episode exists."""
+    row = conn.execute("SELECT status FROM episodes WHERE id=?", (episode_id,)).fetchone()
+    return row[0] if row is not None else None
+
+
+def get_stats_rows(conn: sqlite3.Connection) -> dict:
+    """Return the aggregates needed by :func:`app.pipeline.stats`.
+
+    Shape: ``{"status_counts": {status: count}, "staged_minutes": int,
+    "done_seconds": int, "done_drive_id": int | None}``.
+    """
+    status_counts = {
+        row[0]: row[1]
+        for row in conn.execute("SELECT status, COUNT(*) FROM episodes GROUP BY status")
+    }
+    staged_minutes = conn.execute(
+        "SELECT COALESCE(SUM(est_minutes), 0) FROM episodes WHERE status='staged'"
+    ).fetchone()[0]
+    done_seconds = conn.execute(
+        "SELECT COALESCE(SUM(duration_sec), 0) FROM episodes WHERE status='done'"
+    ).fetchone()[0]
+    done_drive_id = conn.execute(
+        "SELECT MAX(drive_id) FROM episodes WHERE status='done'"
+    ).fetchone()[0]
+    return {
+        "status_counts": status_counts,
+        "staged_minutes": int(staged_minutes or 0),
+        "done_seconds": int(done_seconds or 0),
+        "done_drive_id": done_drive_id,
+    }
