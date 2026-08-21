@@ -1,0 +1,17 @@
+# Runtime data (database + generated audio)
+data/*
+!data/.gitkeep
+!data/audio/
+!data/audio/.gitkeep
+
+# Secrets — never commit
+.env
+
+# Python
+__pycache__/
+*.pyc
+.pytest_cache/
+.venv/
+*.egg-info/
+build/
+dist/
