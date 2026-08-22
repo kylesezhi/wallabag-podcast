@@ -114,6 +114,33 @@ def get_staged_episodes(conn: sqlite3.Connection) -> list[dict]:
     ]
 
 
+def get_feed_episodes(conn: sqlite3.Connection) -> list[dict]:
+    """Return done episodes for the podcast feed, newest generated first.
+
+    Only ``status='done'`` episodes are included (archived episodes are
+    excluded by status). Keys: id, wallabag_id, title, source, url,
+    audio_path, duration_sec, generated_at.
+    """
+    rows = conn.execute(
+        "SELECT id, wallabag_id, title, source, url, audio_path, duration_sec, "
+        "generated_at FROM episodes WHERE status='done' "
+        "ORDER BY generated_at DESC"
+    ).fetchall()
+    return [
+        {
+            "id": row[0],
+            "wallabag_id": row[1],
+            "title": row[2],
+            "source": row[3],
+            "url": row[4],
+            "audio_path": row[5],
+            "duration_sec": row[6],
+            "generated_at": row[7],
+        }
+        for row in rows
+    ]
+
+
 def set_episode_generating(conn: sqlite3.Connection, episode_id: int) -> None:
     """Mark an episode as being generated."""
     conn.execute("UPDATE episodes SET status='generating' WHERE id=?", (episode_id,))
