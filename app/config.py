@@ -50,7 +50,7 @@ class Settings(BaseSettings):
     EXCLUDE_TAGS: Annotated[list[str], NoDecode, BeforeValidator(_split_tags)] = []
     MIN_TEXT_CHARS: int = 200
     MAX_FETCH_PAGES: int = 50
-    FEED_TITLE: str = "My Wallabag Podcast"
+    FEED_TITLE: str = "Kyle's Morning Podcast"
     FEED_AUTHOR: str = "Kyle"
 
 

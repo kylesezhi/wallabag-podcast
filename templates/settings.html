@@ -1,0 +1,86 @@
+{% extends "base.html" %}
+{% block title %}Settings — Kyle's Morning Podcast{% endblock %}
+{% block content %}
+<h1 class="page-title">Settings</h1>
+
+<div class="settings-grid">
+  <section class="card settings-section">
+    <h2 class="section-heading">Wallabag Connection</h2>
+    <p class="connection-status">
+      Status:
+      {% if wallabag_ok %}
+      <span class="status-badge status-badge-done">connected</span>
+      {% else %}
+      <span class="status-badge status-badge-failed">not connected</span>
+      {% endif %}
+    </p>
+    <dl class="podcast-meta">
+      <dt>URL</dt>
+      <dd>{{ wallabag_url }}</dd>
+    </dl>
+    <p class="section-hint">Credentials live only in your <code>.env</code> file and are never shown here.</p>
+    <form method="post" action="/wallabag/test">
+      <button type="submit" class="btn btn-secondary">Test Connection</button>
+    </form>
+  </section>
+
+  <form method="post" action="/settings" class="settings-form">
+    <section class="card settings-section">
+      <h2 class="section-heading">Generation Settings</h2>
+
+      <div class="field">
+        <label for="articles_per_drive">Articles per drive</label>
+        <div class="range-row">
+          <input type="range" id="articles_per_drive" name="articles_per_drive"
+                 min="{{ articles_min }}" max="{{ articles_max }}" step="1"
+                 value="{{ articles_per_drive }}"
+                 oninput="document.getElementById('articles_per_drive_value').textContent = this.value">
+          <output id="articles_per_drive_value" class="range-value">{{ articles_per_drive }}</output>
+        </div>
+      </div>
+
+      <div class="field">
+        <label for="voice">Voice</label>
+        <select id="voice" name="voice">
+          {% for v in voices %}
+          <option value="{{ v }}" {% if v == voice %}selected{% endif %}>{{ v }}</option>
+          {% endfor %}
+        </select>
+        {% if kokoro_error %}
+        <p class="section-hint">Kokoro voices unavailable: {{ kokoro_error }}</p>
+        {% endif %}
+      </div>
+    </section>
+
+    <section class="card settings-section">
+      <h2 class="section-heading">Podcast Settings</h2>
+      <dl class="podcast-meta">
+        <dt>Feed title</dt>
+        <dd>{{ feed_title }}</dd>
+        <dt>Author</dt>
+        <dd>{{ feed_author }}</dd>
+        <dt>Feed URL</dt>
+        <dd><code>{{ base_url }}/feed.xml</code></dd>
+      </dl>
+      <p class="section-hint">Change these via <code>FEED_TITLE</code>, <code>FEED_AUTHOR</code>, and <code>BASE_URL</code> in <code>.env</code>.</p>
+    </section>
+
+    <section class="card settings-section">
+      <h2 class="section-heading">Automation</h2>
+      <div class="field toggle-row">
+        <label for="automation_enabled">Generate every morning</label>
+        <input type="checkbox" id="automation_enabled" name="automation_enabled" disabled>
+        <span class="coming-soon">Coming soon</span>
+      </div>
+      <div class="field">
+        <label for="automation_time">Scheduled time</label>
+        <select id="automation_time" name="automation_time" disabled>
+          <option>{{ automation_time }}</option>
+        </select>
+      </div>
+    </section>
+
+    <button type="submit" class="btn btn-primary btn-block">Save</button>
+  </form>
+</div>
+{% endblock %}

@@ -1,0 +1,448 @@
+/* Kyle's Morning Podcast — cream / green / tan theme (see reference/mockup.png) */
+
+:root {
+  --cream: #f3e9d7;
+  --cream-dark: #e8dbc4;
+  --card: #fffdf7;
+  --green: #1f4d2e;
+  --green-dark: #163a22;
+  --tan: #b8894d;
+  --tan-light: #d9b98c;
+  --text: #2e2a24;
+  --text-muted: #7a7164;
+  --danger: #a03d2a;
+  --radius: 14px;
+  --shadow: 0 2px 8px rgba(46, 42, 36, 0.08);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  background: var(--cream);
+  color: var(--text);
+  line-height: 1.5;
+}
+
+/* --- Header -------------------------------------------------------------- */
+
+.site-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.75rem 1.25rem;
+  background: var(--card);
+  border-bottom: 1px solid var(--cream-dark);
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  text-decoration: none;
+}
+
+.brand-logo {
+  font-size: 1.4rem;
+}
+
+.brand-name {
+  font-size: 1.25rem;
+  font-weight: 700;
+  color: var(--tan);
+}
+
+.nav-gear {
+  font-size: 1.3rem;
+  color: var(--tan);
+  text-decoration: none;
+}
+
+/* --- Flash messages ------------------------------------------------------- */
+
+.flash {
+  max-width: 1080px;
+  margin: 0.75rem auto 0;
+  padding: 0.6rem 1rem;
+  border-radius: var(--radius);
+}
+
+.flash-message {
+  background: #e2eddc;
+  color: var(--green-dark);
+  border: 1px solid #b9d0ac;
+}
+
+.flash-error {
+  background: #f6ddd6;
+  color: var(--danger);
+  border: 1px solid #e0b3a7;
+}
+
+/* --- Layout ---------------------------------------------------------------- */
+
+.content {
+  max-width: 1080px;
+  margin: 0 auto;
+  padding: 1.25rem;
+}
+
+.home-grid,
+.settings-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 1.25rem;
+}
+
+@media (min-width: 900px) {
+  .home-grid {
+    grid-template-columns: 2fr 1fr;
+    align-items: start;
+  }
+
+  .settings-grid {
+    grid-template-columns: 1fr 1fr;
+    align-items: start;
+  }
+}
+
+.card {
+  background: var(--card);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  padding: 1.25rem;
+}
+
+.page-title {
+  font-size: 1.6rem;
+  margin: 0.5rem 0 1rem;
+}
+
+.section-heading {
+  font-size: 1.05rem;
+  margin: 0 0 0.75rem;
+}
+
+.section-hint {
+  color: var(--text-muted);
+  font-size: 0.85rem;
+}
+
+/* --- Today's Drive card ----------------------------------------------------- */
+
+.drive-card {
+  text-align: center;
+}
+
+.drive-title {
+  font-size: 1.9rem;
+  margin: 0.25rem 0 0;
+}
+
+.drive-status {
+  color: var(--text-muted);
+  margin: 0.25rem 0 1rem;
+}
+
+.drive-stats {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 1.5rem;
+  margin-bottom: 1.25rem;
+}
+
+.stat-value {
+  display: block;
+  font-size: 1.6rem;
+  font-weight: 700;
+}
+
+.stat-label {
+  color: var(--text-muted);
+  font-size: 0.85rem;
+}
+
+.stat-divider {
+  width: 1px;
+  height: 2.5rem;
+  background: var(--cream-dark);
+}
+
+/* --- Buttons ------------------------------------------------------------------ */
+
+.btn {
+  display: inline-block;
+  border: none;
+  border-radius: 10px;
+  padding: 0.65rem 1.2rem;
+  font-size: 0.95rem;
+  font-weight: 600;
+  cursor: pointer;
+  text-decoration: none;
+}
+
+.btn-block {
+  display: block;
+  width: 100%;
+  margin-top: 0.6rem;
+}
+
+.btn-primary {
+  background: var(--green);
+  color: #fff;
+}
+
+.btn-primary:hover {
+  background: var(--green-dark);
+}
+
+.btn-secondary {
+  background: var(--tan);
+  color: #fff;
+}
+
+.btn-tan {
+  background: var(--tan-light);
+  color: var(--text);
+}
+
+.btn-outline {
+  background: transparent;
+  border: 1.5px solid var(--tan);
+  color: var(--tan);
+}
+
+/* --- Queue --------------------------------------------------------------------- */
+
+.progress-card {
+  margin-top: 1rem;
+  background: #eef3e6;
+}
+
+.progress-text {
+  margin: 0;
+  color: var(--green-dark);
+  font-weight: 600;
+}
+
+.queue-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin: 1.25rem 0 0.75rem;
+}
+
+.queue-header h2 {
+  margin: 0;
+}
+
+.queue-actions {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.queue-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.queue-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.9rem 1.1rem;
+}
+
+.queue-item-title {
+  margin: 0;
+  font-weight: 700;
+}
+
+.queue-item-meta {
+  margin: 0.2rem 0 0;
+  color: var(--text-muted);
+  font-size: 0.85rem;
+  display: flex;
+  gap: 1rem;
+}
+
+.queue-item-status {
+  margin: 0.35rem 0 0;
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  font-size: 0.8rem;
+}
+
+.queue-item-error {
+  color: var(--danger);
+}
+
+.queue-item-remove {
+  margin: 0;
+}
+
+.btn-remove {
+  border: none;
+  background: var(--tan-light);
+  color: var(--text);
+  width: 2rem;
+  height: 2rem;
+  border-radius: 50%;
+  font-size: 1.1rem;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.btn-remove:hover {
+  background: var(--tan);
+  color: #fff;
+}
+
+.status-badge {
+  display: inline-block;
+  padding: 0.1rem 0.55rem;
+  border-radius: 999px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.status-badge-staged {
+  background: var(--cream-dark);
+  color: var(--text);
+}
+
+.status-badge-generating {
+  background: #f0e2b8;
+  color: #7a5b12;
+}
+
+.status-badge-done {
+  background: #d9e8cf;
+  color: var(--green-dark);
+}
+
+.status-badge-failed {
+  background: #f6ddd6;
+  color: var(--danger);
+}
+
+.queue-empty {
+  color: var(--text-muted);
+}
+
+/* --- Settings ------------------------------------------------------------------- */
+
+.settings-section {
+  margin-bottom: 1.25rem;
+}
+
+.settings-form .settings-section:last-of-type {
+  margin-bottom: 0.75rem;
+}
+
+.connection-status {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.field {
+  margin-bottom: 1rem;
+}
+
+.field label {
+  display: block;
+  font-weight: 600;
+  margin-bottom: 0.3rem;
+}
+
+.field select,
+.field input[type="text"] {
+  width: 100%;
+  padding: 0.55rem 0.7rem;
+  border: 1px solid var(--cream-dark);
+  border-radius: 10px;
+  background: #fff;
+  font-size: 0.95rem;
+}
+
+.range-row {
+  display: flex;
+  align-items: center;
+  gap: 0.9rem;
+}
+
+.range-row input[type="range"] {
+  flex: 1;
+  accent-color: var(--tan);
+}
+
+.range-value {
+  min-width: 2.5rem;
+  text-align: right;
+  font-weight: 700;
+}
+
+.toggle-row {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+}
+
+.toggle-row label {
+  margin: 0;
+  flex: 1;
+}
+
+.toggle-row input[type="checkbox"] {
+  width: 1.2rem;
+  height: 1.2rem;
+  accent-color: var(--tan);
+}
+
+.coming-soon {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--tan);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+/* --- Podcast info ------------------------------------------------------------------ */
+
+.podcast-meta {
+  margin: 0 0 0.75rem;
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 0.3rem 1rem;
+  font-size: 0.9rem;
+}
+
+.podcast-meta dt {
+  font-weight: 700;
+}
+
+.podcast-meta dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.podcast-hint {
+  color: var(--text-muted);
+  font-size: 0.85rem;
+  margin: 0;
+}

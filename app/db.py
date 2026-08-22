@@ -263,6 +263,57 @@ def get_episode_status(conn: sqlite3.Connection, episode_id: int) -> str | None:
     return row[0] if row is not None else None
 
 
+def get_queue_episodes(conn: sqlite3.Connection) -> list[dict]:
+    """Return the visible queue (staged/generating/done/failed), oldest first.
+
+    Archived episodes are hidden. Keys: id, title, source, url, status,
+    est_minutes, duration_sec, error.
+    """
+    rows = conn.execute(
+        "SELECT id, title, source, url, status, est_minutes, duration_sec, error "
+        "FROM episodes WHERE status IN ('staged','generating','done','failed') "
+        "ORDER BY id"
+    ).fetchall()
+    return [
+        {
+            "id": row[0],
+            "title": row[1],
+            "source": row[2],
+            "url": row[3],
+            "status": row[4],
+            "est_minutes": row[5],
+            "duration_sec": row[6],
+            "error": row[7],
+        }
+        for row in rows
+    ]
+
+
+def has_staged_episodes(conn: sqlite3.Connection) -> bool:
+    """Return True when at least one episode is staged (ready to generate)."""
+    row = conn.execute(
+        "SELECT 1 FROM episodes WHERE status='staged' LIMIT 1"
+    ).fetchone()
+    return row is not None
+
+
+def get_setting(conn: sqlite3.Connection, key: str) -> str | None:
+    """Return a UI-tunable setting value, or None when the key is unknown."""
+    row = conn.execute("SELECT value FROM settings WHERE key=?", (key,)).fetchone()
+    return row[0] if row is not None else None
+
+
+def set_setting(conn: sqlite3.Connection, key: str, value: str) -> None:
+    """Upsert a UI-tunable setting."""
+    conn.execute(
+        "INSERT INTO settings (key, value, updated_at) VALUES (?, ?, ?) "
+        "ON CONFLICT(key) DO UPDATE SET value=excluded.value, "
+        "updated_at=excluded.updated_at",
+        (key, value, _now_iso()),
+    )
+    conn.commit()
+
+
 def get_stats_rows(conn: sqlite3.Connection) -> dict:
     """Return the aggregates needed by :func:`app.pipeline.stats`.
 

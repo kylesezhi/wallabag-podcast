@@ -1,0 +1,108 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="home-grid">
+  <section class="drive-column">
+    <div class="card drive-card">
+      <h1 class="drive-title">Today's Drive</h1>
+      <p class="drive-status">
+        {% if generating %}Generating your drive&hellip;
+        {% elif stats.staged > 0 %}Ready to generate
+        {% elif stats.done > 0 %}Ready to listen
+        {% else %}Your queue is empty{% endif %}
+      </p>
+      <div class="drive-stats">
+        <div class="stat">
+          <span class="stat-value">{{ stats.total_minutes }}</span>
+          <span class="stat-label">minutes</span>
+        </div>
+        <div class="stat-divider" aria-hidden="true"></div>
+        <div class="stat">
+          <span class="stat-value">{{ stats.articles }}</span>
+          <span class="stat-label">articles</span>
+        </div>
+      </div>
+      <form method="post" action="/queue/generate">
+        <button type="submit" class="btn btn-primary btn-block">Generate New Drive</button>
+      </form>
+      <form method="post" action="/queue/add-random">
+        <button type="submit" class="btn btn-secondary btn-block">Add Random</button>
+      </form>
+    </div>
+
+    {% if generating %}
+    <div class="card progress-card" id="generation-progress" data-generating="true">
+      <p class="progress-text">
+        Generating&hellip;
+        <span id="progress-done">{{ stats.done }}</span> of
+        <span id="progress-total">{{ stats.staged + stats.done + stats.failed }}</span> episodes done
+      </p>
+    </div>
+    {% endif %}
+
+    <div class="queue-header">
+      <h2>Queue</h2>
+      <div class="queue-actions">
+        <form method="post" action="/queue/archive-completed">
+          <button type="submit" class="btn btn-tan">Archive Completed</button>
+        </form>
+        <form method="post" action="/queue/clear">
+          <button type="submit" class="btn btn-outline">Clear Queue</button>
+        </form>
+      </div>
+    </div>
+
+    {% if episodes %}
+    <ul class="queue-list">
+      {% for ep in episodes %}
+      <li class="card queue-item status-{{ ep.status }}">
+        <div class="queue-item-body">
+          <p class="queue-item-title">{{ ep.title }}</p>
+          <p class="queue-item-meta">
+            <span class="queue-item-source">{{ ep.source }}</span>
+            <span class="queue-item-minutes">
+              &#128337;
+              {% if ep.status == "done" and ep.duration_sec is not none %}
+              {{ (ep.duration_sec // 60) }} min
+              {% else %}
+              {{ ep.est_minutes }} mins
+              {% endif %}
+            </span>
+          </p>
+          <p class="queue-item-status">
+            <span class="status-badge status-badge-{{ ep.status }}">{{ ep.status }}</span>
+            {% if ep.status == "failed" and ep.error %}
+            <span class="queue-item-error">{{ ep.error }}</span>
+            {% endif %}
+          </p>
+        </div>
+        {% if ep.status in ("staged", "failed") %}
+        <form method="post" action="/queue/{{ ep.id }}/remove" class="queue-item-remove">
+          <button type="submit" class="btn-remove" title="Remove from queue" aria-label="Remove {{ ep.title }}">&#8854;</button>
+        </form>
+        {% endif %}
+      </li>
+      {% endfor %}
+    </ul>
+    {% else %}
+    <div class="card queue-empty">
+      <p>No articles in the queue yet — it's empty. Use <strong>Add Random</strong> to stage a few articles.</p>
+    </div>
+    {% endif %}
+  </section>
+
+  <aside class="info-column">
+    <div class="card podcast-card">
+      <h2 class="section-heading">Podcast</h2>
+      <dl class="podcast-meta">
+        <dt>Feed</dt>
+        <dd><a href="/feed.xml">{{ feed_title }}</a></dd>
+        <dt>Author</dt>
+        <dd>{{ feed_author }}</dd>
+        <dt>Subscribe URL</dt>
+        <dd><code>{{ base_url }}/feed.xml</code></dd>
+      </dl>
+      <p class="podcast-hint">Add this URL to your podcast app. Set <code>BASE_URL</code> to your LAN address to listen from your phone.</p>
+    </div>
+  </aside>
+</div>
+{% endblock %}

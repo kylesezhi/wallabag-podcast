@@ -1,0 +1,495 @@
+"""Tests for the web UI routes in app/main.py.
+
+The env fixture points DATA_DIR at tmp_path and initializes the DB schema,
+matching the pattern used in test_pipeline.py and test_rss.py. Routes that
+need external clients (Wallabag, Kokoro) use lightweight mock objects whose
+methods are async stubs; pipeline functions that run in the background are
+patched at the ``app.main`` import site.
+"""
+
+import sqlite3
+
+import pytest
+from fastapi.testclient import TestClient
+
+from app.config import get_settings
+from app.db import connect, get_db_path, get_setting, init_db
+from app.main import app
+
+_REQUIRED_ENV = {
+    "WALLABAG_CLIENT_ID": "test_client_id",
+    "WALLABAG_CLIENT_SECRET": "test_client_secret",
+    "WALLABAG_USERNAME": "test_user",
+    "WALLABAG_PASSWORD": "test_pass",
+}
+
+
+@pytest.fixture
+def env(tmp_path, monkeypatch):
+    """Point DATA_DIR at tmp_path, init the DB schema, and seed settings."""
+    for key, value in _REQUIRED_ENV.items():
+        monkeypatch.setenv(key, value)
+    monkeypatch.setenv("DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("KOKORO_BASE_URL", "http://kokoro.test")
+    monkeypatch.setenv("WALLABAG_URL", "https://wallabag.test")
+    get_settings.cache_clear()
+    init_db(get_db_path())
+    return tmp_path
+
+
+@pytest.fixture
+def client(env):
+    with TestClient(app) as test_client:
+        yield test_client
+
+
+def _insert_staged(conn: sqlite3.Connection, entries: list[tuple[int, str]]) -> None:
+    """Insert staged episodes as (wallabag_id, title) pairs."""
+    for wallabag_id, title in entries:
+        conn.execute(
+            "INSERT INTO episodes (wallabag_id, title, source, url, status, "
+            "est_minutes, language, created_at) VALUES (?, ?, ?, ?, 'staged', "
+            "5, 'en', '2026-01-01T00:00:00+00:00')",
+            (
+                wallabag_id,
+                title,
+                f"example.com/{wallabag_id}",
+                f"https://example.com/{wallabag_id}",
+            ),
+        )
+    conn.commit()
+
+
+def _insert_done(conn: sqlite3.Connection, wallabag_id: int, title: str) -> None:
+    conn.execute(
+        "INSERT INTO episodes (wallabag_id, title, source, url, status, "
+        "est_minutes, language, audio_path, duration_sec, drive_id, "
+        "created_at, generated_at) VALUES (?, ?, ?, ?, 'done', 5, 'en', "
+        "'/tmp/audio.mp3', 300, 1, '2026-01-01T00:00:00+00:00', "
+        "'2026-01-02T00:00:00+00:00')",
+        (
+            wallabag_id,
+            title,
+            f"example.com/{wallabag_id}",
+            f"https://example.com/{wallabag_id}",
+        ),
+    )
+    conn.commit()
+
+
+def _insert_failed(conn: sqlite3.Connection, wallabag_id: int, title: str) -> None:
+    conn.execute(
+        "INSERT INTO episodes (wallabag_id, title, source, url, status, "
+        "est_minutes, language, error, created_at) VALUES (?, ?, ?, ?, "
+        "'failed', 5, 'en', 'some error', '2026-01-01T00:00:00+00:00')",
+        (
+            wallabag_id,
+            title,
+            f"example.com/{wallabag_id}",
+            f"https://example.com/{wallabag_id}",
+        ),
+    )
+    conn.commit()
+
+
+class _MockWallabag:
+    """Minimal async mock matching WallabagClient's public surface."""
+
+    def __init__(self, connected: bool = True):
+        self._connected = connected
+
+    async def test_connection(self) -> bool:
+        return self._connected
+
+    async def aclose(self) -> None:
+        pass
+
+
+class _MockKokoro:
+    """Minimal async mock matching KokoroClient's public surface."""
+
+    def __init__(self, voice_list: list[str] | None = None):
+        self._voices = voice_list or ["af_heart", "af_blossom"]
+
+    async def voices(self) -> list[str]:
+        return self._voices
+
+    async def aclose(self) -> None:
+        pass
+
+
+# ---------------------------------------------------------------------------
+# Home page
+# ---------------------------------------------------------------------------
+
+
+def test_home_empty(client):
+    response = client.get("/")
+    assert response.status_code == 200
+    assert "Today" in response.text
+    assert "Drive" in response.text
+    assert "Add Random" in response.text
+    assert "Generate" in response.text
+    assert "No articles" in response.text.lower() or "empty" in response.text.lower()
+
+
+def test_home_shows_queue(client):
+    with sqlite3.connect(get_db_path()) as conn:
+        _insert_staged(conn, [(1, "First Article"), (2, "Second Article")])
+
+    response = client.get("/")
+
+    assert response.status_code == 200
+    assert "First Article" in response.text
+    assert "Second Article" in response.text
+    assert "staged" in response.text.lower()
+
+
+def test_home_shows_done_with_duration(client):
+    with sqlite3.connect(get_db_path()) as conn:
+        _insert_done(conn, 10, "Finished Episode")
+
+    response = client.get("/")
+
+    assert response.status_code == 200
+    assert "Finished Episode" in response.text
+    assert "done" in response.text.lower()
+    assert "5 min" in response.text
+
+
+def test_home_shows_failed_with_error(client):
+    with sqlite3.connect(get_db_path()) as conn:
+        _insert_failed(conn, 20, "Broken Article")
+
+    response = client.get("/")
+
+    assert response.status_code == 200
+    assert "Broken Article" in response.text
+    assert "failed" in response.text.lower()
+    assert "some error" in response.text
+
+
+# ---------------------------------------------------------------------------
+# Settings page
+# ---------------------------------------------------------------------------
+
+
+def test_settings_page(client):
+    app.state.wallabag_client = _MockWallabag(connected=True)
+    app.state.kokoro_client = _MockKokoro()
+
+    response = client.get("/settings")
+
+    assert response.status_code == 200
+    assert "Settings" in response.text
+    assert "articles_per_drive" in response.text
+    assert "voice" in response.text.lower()
+    assert "connected" in response.text.lower()
+    assert "Coming soon" in response.text
+
+
+def test_settings_page_wallabag_fail(client):
+    app.state.wallabag_client = _MockWallabag(connected=False)
+    app.state.kokoro_client = _MockKokoro()
+
+    response = client.get("/settings")
+
+    assert response.status_code == 200
+    assert "not connected" in response.text.lower()
+
+
+def test_settings_page_kokoro_unreachable(client):
+    class _BrokenKokoro:
+        async def voices(self):
+            raise Exception("unreachable")
+
+        async def aclose(self) -> None:
+            pass
+
+    app.state.wallabag_client = _MockWallabag(connected=True)
+    app.state.kokoro_client = _BrokenKokoro()
+
+    response = client.get("/settings")
+
+    assert response.status_code == 200
+    assert "unreachable" in response.text
+    assert "af_heart" in response.text
+
+
+# ---------------------------------------------------------------------------
+# Queue actions
+# ---------------------------------------------------------------------------
+
+
+def test_add_random_success(client, monkeypatch):
+    async def mock_add_random(n, wallabag_client, settings):
+        conn = connect()
+        try:
+            conn.execute(
+                "INSERT INTO episodes (wallabag_id, title, source, url, status, "
+                "est_minutes, language, created_at) VALUES (?, ?, ?, ?, 'staged', "
+                "5, 'en', '2026-01-01T00:00:00+00:00')",
+                (999, "Mocked Article", "example.com", "https://example.com"),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+        return 1
+
+    monkeypatch.setattr("app.main.add_random", mock_add_random)
+
+    response = client.post("/queue/add-random", follow_redirects=False)
+
+    assert response.status_code == 303
+    assert response.headers["location"].startswith("/?")
+    assert "message" in response.headers["location"]
+
+    with sqlite3.connect(get_db_path()) as conn:
+        row = conn.execute(
+            "SELECT title FROM episodes WHERE wallabag_id=999"
+        ).fetchone()
+    assert row is not None
+    assert row[0] == "Mocked Article"
+
+
+def test_add_random_wallabag_error(client, monkeypatch):
+    from app.wallabag import WallabagError
+
+    async def mock_add_random(n, wallabag_client, settings):
+        raise WallabagError("connection refused")
+
+    monkeypatch.setattr("app.main.add_random", mock_add_random)
+
+    response = client.post("/queue/add-random", follow_redirects=False)
+
+    assert response.status_code == 303
+    assert "error" in response.headers["location"]
+
+
+def test_remove_staged(client):
+    with sqlite3.connect(get_db_path()) as conn:
+        _insert_staged(conn, [(1, "To Remove")])
+        episode_id = conn.execute(
+            "SELECT id FROM episodes WHERE wallabag_id=1"
+        ).fetchone()[0]
+
+    response = client.post(f"/queue/{episode_id}/remove", follow_redirects=False)
+
+    assert response.status_code == 303
+    with sqlite3.connect(get_db_path()) as conn:
+        row = conn.execute(
+            "SELECT status FROM episodes WHERE id=?", (episode_id,)
+        ).fetchone()
+    assert row is None
+
+
+def test_remove_done_fails(client):
+    with sqlite3.connect(get_db_path()) as conn:
+        _insert_done(conn, 5, "Done Article")
+        episode_id = conn.execute(
+            "SELECT id FROM episodes WHERE wallabag_id=5"
+        ).fetchone()[0]
+
+    response = client.post(f"/queue/{episode_id}/remove", follow_redirects=False)
+
+    assert response.status_code == 303
+    assert "error" in response.headers["location"]
+    with sqlite3.connect(get_db_path()) as conn:
+        row = conn.execute(
+            "SELECT status FROM episodes WHERE id=?", (episode_id,)
+        ).fetchone()
+    assert row is not None
+    assert row[0] == "done"
+
+
+def test_remove_nonexistent(client):
+    response = client.post("/queue/9999/remove", follow_redirects=False)
+
+    assert response.status_code == 303
+    assert "error" in response.headers["location"]
+
+
+def test_generate_no_staged(client):
+    response = client.post("/queue/generate", follow_redirects=False)
+
+    assert response.status_code == 303
+    assert "error" in response.headers["location"]
+
+
+def test_generate_starts(client, monkeypatch):
+    with sqlite3.connect(get_db_path()) as conn:
+        _insert_staged(conn, [(1, "Ready to Generate")])
+
+    async def mock_generate_all(wallabag_client, kokoro_client, settings):
+        return {"total": 1, "done": 1, "failed": 0, "skipped": 0}
+
+    monkeypatch.setattr("app.main.generate_all", mock_generate_all)
+
+    response = client.post("/queue/generate", follow_redirects=False)
+
+    assert response.status_code == 303
+    assert "generating" in response.headers["location"]
+
+
+def test_archive_completed(client):
+    with sqlite3.connect(get_db_path()) as conn:
+        _insert_done(conn, 1, "Done One")
+        _insert_done(conn, 2, "Done Two")
+        _insert_staged(conn, [(3, "Still Staged")])
+
+    response = client.post("/queue/archive-completed", follow_redirects=False)
+
+    assert response.status_code == 303
+    with sqlite3.connect(get_db_path()) as conn:
+        statuses = dict(conn.execute("SELECT wallabag_id, status FROM episodes"))
+    assert statuses[1] == "archived"
+    assert statuses[2] == "archived"
+    assert statuses[3] == "staged"
+
+
+def test_archive_completed_empty(client):
+    response = client.post("/queue/archive-completed", follow_redirects=False)
+
+    assert response.status_code == 303
+    assert "message" in response.headers["location"]
+
+
+def test_clear_queue(client):
+    with sqlite3.connect(get_db_path()) as conn:
+        _insert_staged(conn, [(1, "Staged One"), (2, "Staged Two")])
+        _insert_failed(conn, 3, "Failed One")
+        _insert_done(conn, 4, "Done One")
+
+    response = client.post("/queue/clear", follow_redirects=False)
+
+    assert response.status_code == 303
+    with sqlite3.connect(get_db_path()) as conn:
+        remaining = dict(conn.execute("SELECT wallabag_id, status FROM episodes"))
+    assert 1 not in remaining
+    assert 2 not in remaining
+    assert 3 not in remaining
+    assert remaining[4] == "done"
+
+
+# ---------------------------------------------------------------------------
+# Status polling endpoint
+# ---------------------------------------------------------------------------
+
+
+def test_queue_status_empty(client):
+    response = client.get("/queue/status")
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["generating"] is False
+    assert data["stats"]["articles"] == 0
+    assert data["episodes"] == []
+
+
+def test_queue_status_with_episodes(client):
+    with sqlite3.connect(get_db_path()) as conn:
+        _insert_staged(conn, [(1, "Article A"), (2, "Article B")])
+        _insert_done(conn, 3, "Article C")
+
+    response = client.get("/queue/status")
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["generating"] is False
+    assert data["stats"]["articles"] == 3
+    assert data["stats"]["staged"] == 2
+    assert data["stats"]["done"] == 1
+    ids = [ep["id"] for ep in data["episodes"]]
+    assert len(ids) == 3
+
+
+# ---------------------------------------------------------------------------
+# Settings save + Wallabag test
+# ---------------------------------------------------------------------------
+
+
+def test_save_settings(client):
+    response = client.post(
+        "/settings",
+        data={"articles_per_drive": "15", "voice": "af_blossom"},
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 303
+    assert "message" in response.headers["location"]
+    with sqlite3.connect(get_db_path()) as conn:
+        assert get_setting(conn, "articles_per_drive") == "15"
+        assert get_setting(conn, "voice") == "af_blossom"
+
+
+def test_save_settings_invalid_number(client):
+    response = client.post(
+        "/settings",
+        data={"articles_per_drive": "abc", "voice": "af_heart"},
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 303
+    assert "error" in response.headers["location"]
+    with sqlite3.connect(get_db_path()) as conn:
+        assert get_setting(conn, "articles_per_drive") == "10"
+
+
+def test_save_settings_out_of_range(client):
+    response = client.post(
+        "/settings",
+        data={"articles_per_drive": "100", "voice": "af_heart"},
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 303
+    assert "error" in response.headers["location"]
+
+
+def test_save_settings_empty_voice(client):
+    response = client.post(
+        "/settings",
+        data={"articles_per_drive": "10", "voice": ""},
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 303
+    assert "error" in response.headers["location"]
+
+
+def test_wallabag_test_ok(client):
+    app.state.wallabag_client = _MockWallabag(connected=True)
+
+    response = client.post("/wallabag/test", follow_redirects=False)
+
+    assert response.status_code == 303
+    assert "message" in response.headers["location"]
+    assert "OK" in response.headers["location"]
+
+
+def test_wallabag_test_fail(client):
+    app.state.wallabag_client = _MockWallabag(connected=False)
+
+    response = client.post("/wallabag/test", follow_redirects=False)
+
+    assert response.status_code == 303
+    assert "error" in response.headers["location"]
+
+
+# ---------------------------------------------------------------------------
+# Existing routes still work
+# ---------------------------------------------------------------------------
+
+
+def test_feed_route_still_works(client):
+    response = client.get("/feed.xml")
+
+    assert response.status_code == 200
+    assert "xml" in response.headers["content-type"]
+
+
+def test_health_route(client):
+    response = client.get("/health")
+
+    assert response.status_code == 200
+    assert response.json() == {"status": "ok"}
