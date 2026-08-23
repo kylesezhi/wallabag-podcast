@@ -64,7 +64,7 @@
               {% if ep.status == "done" and ep.duration_sec is not none %}
               {{ (ep.duration_sec // 60) }} min
               {% else %}
-              {{ ep.est_minutes }} mins
+              {{ ep.est_minutes }} min
               {% endif %}
             </span>
           </p>
