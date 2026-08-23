@@ -3,3 +3,4 @@
 - add archive in wallabag button to each episode in ui
 - make "copy" button next to link to rss feed
 - Generate New Drive button should be labeled Generate Audio
+- 1 mins - shouldn't be plural
