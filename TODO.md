@@ -1,5 +1,4 @@
 - make archive in wallabag a part of the delete button in ui
-- make "copy" button next to link to rss feed
 - Add Random button should specify how many get added
 - birthday shoutouts
 - delete is not showing on generating episodes
