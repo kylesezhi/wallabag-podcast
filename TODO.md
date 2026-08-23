@@ -1,2 +1,4 @@
 - Use cover art in podcast
-- Give better progress when generating, at the episode level give a %
+- Fix progress
+- archive is named delete, make it delete file
+- add, archive in wallabag button to ui
