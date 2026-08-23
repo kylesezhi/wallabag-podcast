@@ -2,6 +2,7 @@
 data/*
 !data/.gitkeep
 !data/audio/
+data/audio/*
 !data/audio/.gitkeep
 
 # Secrets — never commit
