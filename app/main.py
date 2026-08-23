@@ -197,6 +197,7 @@ async def home(request: Request, message: str | None = None, error: str | None =
             "feed_title": settings.FEED_TITLE,
             "feed_author": settings.FEED_AUTHOR,
             "base_url": settings.BASE_URL,
+            "wallabag_url": settings.WALLABAG_URL,
         },
     )
 

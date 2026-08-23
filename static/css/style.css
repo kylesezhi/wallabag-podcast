@@ -269,6 +269,15 @@ body {
   font-weight: 700;
 }
 
+a.queue-item-title {
+  color: var(--green);
+  text-decoration: none;
+}
+
+a.queue-item-title:hover {
+  text-decoration: underline;
+}
+
 .queue-item-meta {
   margin: 0.2rem 0 0;
   color: var(--text-muted);

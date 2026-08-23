@@ -266,24 +266,26 @@ def get_episode_status(conn: sqlite3.Connection, episode_id: int) -> str | None:
 def get_queue_episodes(conn: sqlite3.Connection) -> list[dict]:
     """Return the visible queue (staged/generating/done/failed), oldest first.
 
-    Archived episodes are hidden. Keys: id, title, source, url, status,
-    est_minutes, duration_sec, error.
+    Archived episodes are hidden. Keys: id, wallabag_id, title, source, url,
+    status, est_minutes, duration_sec, error.
     """
     rows = conn.execute(
-        "SELECT id, title, source, url, status, est_minutes, duration_sec, error "
+        "SELECT id, wallabag_id, title, source, url, status, est_minutes, "
+        "duration_sec, error "
         "FROM episodes WHERE status IN ('staged','generating','done','failed') "
         "ORDER BY id"
     ).fetchall()
     return [
         {
             "id": row[0],
-            "title": row[1],
-            "source": row[2],
-            "url": row[3],
-            "status": row[4],
-            "est_minutes": row[5],
-            "duration_sec": row[6],
-            "error": row[7],
+            "wallabag_id": row[1],
+            "title": row[2],
+            "source": row[3],
+            "url": row[4],
+            "status": row[5],
+            "est_minutes": row[6],
+            "duration_sec": row[7],
+            "error": row[8],
         }
         for row in rows
     ]

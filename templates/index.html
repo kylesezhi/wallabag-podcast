@@ -56,7 +56,7 @@
       {% for ep in episodes %}
       <li class="card queue-item status-{{ ep.status }}">
         <div class="queue-item-body">
-          <p class="queue-item-title">{{ ep.title }}</p>
+          <a class="queue-item-title" href="{{ wallabag_url.rstrip('/') }}/view/{{ ep.wallabag_id }}" target="_blank" rel="noopener noreferrer">{{ ep.title }}</a>
           <p class="queue-item-meta">
             <span class="queue-item-source">{{ ep.source }}</span>
             <span class="queue-item-minutes">

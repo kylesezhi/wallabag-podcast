@@ -180,6 +180,19 @@ def test_home_shows_queue(client):
     assert "staged" in response.text.lower()
 
 
+def test_home_article_links_to_wallabag(client):
+    with sqlite3.connect(get_db_path()) as conn:
+        _insert_staged(conn, [(1, "First Article"), (2, "Second Article")])
+
+    response = client.get("/")
+
+    assert response.status_code == 200
+    assert 'href="' in response.text and "/view/1" in response.text
+    assert 'href="' in response.text and "/view/2" in response.text
+    assert 'target="_blank"' in response.text
+    assert 'rel="noopener noreferrer"' in response.text
+
+
 def test_home_shows_done_with_duration(client):
     with sqlite3.connect(get_db_path()) as conn:
         _insert_done(conn, 10, "Finished Episode")
