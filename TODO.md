@@ -1,0 +1,3 @@
+- Use cover art in podcast
+- Give better progress when generating, at the episode level give a %
+- Add a stop generating to the currently generating episode
