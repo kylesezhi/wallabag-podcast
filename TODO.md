@@ -4,3 +4,4 @@
 - Generate New Drive button should be labeled Generate Audio
 - 1 mins - shouldn't be plural
 - birthday shoutouts
+- clear queue - > clear incomplete 
