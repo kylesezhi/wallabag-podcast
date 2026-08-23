@@ -208,7 +208,6 @@ async def home(request: Request, message: str | None = None, error: str | None =
             "message": message,
             "error": error,
             "feed_title": settings.FEED_TITLE,
-            "feed_author": settings.FEED_AUTHOR,
             "base_url": settings.BASE_URL,
             "wallabag_url": settings.WALLABAG_URL,
         },
@@ -262,7 +261,6 @@ async def settings_page(
             "articles_min": _ARTICLES_PER_DRIVE_MIN,
             "articles_max": _ARTICLES_PER_DRIVE_MAX,
             "feed_title": settings.FEED_TITLE,
-            "feed_author": settings.FEED_AUTHOR,
             "base_url": settings.BASE_URL,
         },
     )

@@ -84,7 +84,6 @@ Copy `.env.example` to `.env` and fill it in. All variables:
 | `MIN_TEXT_CHARS` | Minimum cleaned-text length for an article to be worth narrating; shorter articles are skipped (default `200`). |
 | `MAX_FETCH_PAGES` | Safety cap on pages fetched while enumerating unread candidates (default `50`). |
 | `FEED_TITLE` | Podcast feed title shown in podcast apps. |
-| `FEED_AUTHOR` | Podcast author shown in podcast apps. |
 
 Wallabag credentials are OAuth password-grant values — they never appear in
 the UI or the database, only in `.env`.

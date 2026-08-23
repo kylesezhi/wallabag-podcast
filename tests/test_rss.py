@@ -83,7 +83,6 @@ def test_valid_rss(env):
     channel = root.find("channel")
     assert channel.find("title").text == get_settings().FEED_TITLE
     # Channel-level iTunes podcast metadata.
-    assert channel.find("itunes:author", _NS).text == get_settings().FEED_AUTHOR
     assert channel.find("itunes:category", _NS).get("text") == "Society & Culture"
     assert channel.find("itunes:explicit", _NS).text == "no"
     assert channel.find("itunes:type", _NS).text == "episodic"

@@ -54,3 +54,52 @@
     }
   });
 })();
+
+/* Copy the subscribe URL to the clipboard; falls back to execCommand for
+ * plain-HTTP LAN origins where navigator.clipboard is unavailable. */
+(function () {
+  "use strict";
+
+  function legacyCopy(text) {
+    var area = document.createElement("textarea");
+    area.value = text;
+    area.setAttribute("readonly", "");
+    area.style.position = "fixed";
+    area.style.opacity = "0";
+    document.body.appendChild(area);
+    area.select();
+    try {
+      return document.execCommand("copy");
+    } catch (err) {
+      return false;
+    } finally {
+      document.body.removeChild(area);
+    }
+  }
+
+  function flashCopied(button) {
+    button.classList.add("copied");
+    setTimeout(function () {
+      button.classList.remove("copied");
+    }, 1500);
+  }
+
+  document.addEventListener("click", function (event) {
+    var button = event.target.closest ? event.target.closest(".btn-copy") : null;
+    if (!button) {
+      return;
+    }
+    var url = button.dataset.copyUrl;
+    if (!url) {
+      return;
+    }
+    if (navigator.clipboard && window.isSecureContext) {
+      navigator.clipboard.writeText(url).then(
+        function () { flashCopied(button); },
+        function () { /* clipboard rejected — no feedback */ }
+      );
+    } else if (legacyCopy(url)) {
+      flashCopied(button);
+    }
+  });
+})();

@@ -51,7 +51,6 @@ class Settings(BaseSettings):
     MIN_TEXT_CHARS: int = 200
     MAX_FETCH_PAGES: int = 50
     FEED_TITLE: str = "Kyle's Morning Podcast"
-    FEED_AUTHOR: str = "Kyle"
 
 
 # Resolve forward references introduced by `from __future__ import annotations`

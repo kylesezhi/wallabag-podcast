@@ -43,7 +43,7 @@ def _enclosure_length(audio_path: str | None) -> int:
 def build_feed(settings: Settings | None = None) -> bytes:
     """Build a podcast RSS 2.0 feed and return it as UTF-8 XML bytes.
 
-    The channel carries iTunes podcast metadata (author, category, explicit,
+    The channel carries iTunes podcast metadata (category, explicit,
     type) and the show cover art (as an iTunes image plus the legacy RSS
     ``<image>`` element); each episode carries an iTunes duration, explicit
     flag, episode type, and the same cover art. Episodes whose audio file is
@@ -62,8 +62,6 @@ def build_feed(settings: Settings | None = None) -> bytes:
     fg.link(href=f"{settings.BASE_URL}/", rel="alternate")
     fg.description("Podcast generated from Wallabag saved articles")
     fg.language("en")
-    fg.author({"name": settings.FEED_AUTHOR})
-    fg.podcast.itunes_author(settings.FEED_AUTHOR)
     fg.podcast.itunes_category("Society & Culture")
     fg.podcast.itunes_explicit("no")
     fg.podcast.itunes_type("episodic")

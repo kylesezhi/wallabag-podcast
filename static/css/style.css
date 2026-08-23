@@ -458,6 +458,45 @@ a.queue-item-title:hover {
   overflow-wrap: anywhere;
 }
 
+.subscribe-url {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.btn-copy {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.15rem;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--tan);
+  cursor: pointer;
+}
+
+.btn-copy:hover {
+  color: var(--green);
+  background: var(--cream-dark);
+}
+
+.btn-copy .icon-check {
+  display: none;
+}
+
+.btn-copy.copied {
+  color: var(--green);
+}
+
+.btn-copy.copied .icon-copy {
+  display: none;
+}
+
+.btn-copy.copied .icon-check {
+  display: block;
+}
+
 .podcast-hint {
   color: var(--text-muted);
   font-size: 0.85rem;

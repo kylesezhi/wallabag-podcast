@@ -33,7 +33,6 @@ EXCLUDE_TAGS=computer,interactive  # comma-separated; client-side filtered (Wall
 MIN_TEXT_CHARS=200                 # skip articles whose cleaned text is shorter
 MAX_FETCH_PAGES=50                # safety cap when enumerating unread candidates
 FEED_TITLE=My Wallabag Podcast
-FEED_AUTHOR=Kyle
 ```
 
 ## UI-tunable settings (persisted in SQLite `settings` table; override .env defaults at runtime)
