@@ -2,3 +2,5 @@
 - Fix progress
 - archive is named delete, make it delete file
 - add, archive in wallabag button to ui
+- make "copy" button next to link to rss feed
+- Generate New Drive button should be labeled Generate Audio

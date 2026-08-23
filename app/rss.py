@@ -1,7 +1,8 @@
 """Podcast RSS 2.0 feed generation (with iTunes extensions).
 
 Builds a feed from done, non-archived episodes (newest generated first).
-Audio files are referenced at ``{BASE_URL}/audio/{id}.mp3``.
+Audio files are referenced at ``{BASE_URL}/audio/{id}.mp3``. The channel and
+each episode carry the cover art at ``{BASE_URL}/static/cover.png``.
 """
 
 from __future__ import annotations
@@ -43,14 +44,17 @@ def build_feed(settings: Settings | None = None) -> bytes:
     """Build a podcast RSS 2.0 feed and return it as UTF-8 XML bytes.
 
     The channel carries iTunes podcast metadata (author, category, explicit,
-    type); each episode carries an iTunes duration, explicit flag, and episode
-    type. Episodes whose audio file is missing still appear with enclosure
-    length 0.
+    type) and the show cover art (as an iTunes image plus the legacy RSS
+    ``<image>`` element); each episode carries an iTunes duration, explicit
+    flag, episode type, and the same cover art. Episodes whose audio file is
+    missing still appear with enclosure length 0.
     """
     settings = settings or get_settings()
 
     fg = FeedGenerator()
     fg.load_extension("podcast")
+
+    cover_url = f"{settings.BASE_URL}/static/cover.png"
 
     fg.id(f"{settings.BASE_URL}/feed.xml")
     fg.title(settings.FEED_TITLE)
@@ -63,6 +67,8 @@ def build_feed(settings: Settings | None = None) -> bytes:
     fg.podcast.itunes_category("Society & Culture")
     fg.podcast.itunes_explicit("no")
     fg.podcast.itunes_type("episodic")
+    fg.podcast.itunes_image(cover_url)
+    fg.image(cover_url, title=settings.FEED_TITLE, link=settings.BASE_URL)
 
     conn = connect()
     try:
@@ -86,5 +92,6 @@ def build_feed(settings: Settings | None = None) -> bytes:
         entry.podcast.itunes_duration(int(episode["duration_sec"] or 0))
         entry.podcast.itunes_explicit("no")
         entry.podcast.itunes_episode_type("full")
+        entry.podcast.itunes_image(cover_url)
 
     return fg.rss_str()

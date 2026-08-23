@@ -87,6 +87,10 @@ def test_valid_rss(env):
     assert channel.find("itunes:category", _NS).get("text") == "Society & Culture"
     assert channel.find("itunes:explicit", _NS).text == "no"
     assert channel.find("itunes:type", _NS).text == "episodic"
+    # Channel cover art: iTunes image plus the legacy RSS <image> element.
+    base_url = get_settings().BASE_URL
+    assert channel.find("itunes:image", _NS).get("href") == f"{base_url}/static/cover.png"
+    assert channel.find("image").find("url").text == f"{base_url}/static/cover.png"
     items = channel.findall("item")
     assert len(items) == 2
     for item in items:
@@ -96,6 +100,7 @@ def test_valid_rss(env):
         assert item.find("pubDate") is not None
         assert item.find("itunes:explicit", _NS).text == "no"
         assert item.find("itunes:episodeType", _NS).text == "full"
+        assert item.find("itunes:image", _NS).get("href") == f"{base_url}/static/cover.png"
 
 
 def test_enclosure_correctness(env):
@@ -150,6 +155,11 @@ def test_empty_feed(env):
     root = ET.fromstring(build_feed())
     assert root.tag == "rss"
     assert root.findall("channel/item") == []
+    # The channel cover must be present even with zero episodes.
+    channel = root.find("channel")
+    base_url = get_settings().BASE_URL
+    assert channel.find("itunes:image", _NS).get("href") == f"{base_url}/static/cover.png"
+    assert channel.find("image").find("url").text == f"{base_url}/static/cover.png"
 
 
 def test_missing_audio_and_bad_generated_at_are_graceful(env):
@@ -182,3 +192,15 @@ def test_feed_route(env):
     root = ET.fromstring(response.content)
     assert root.tag == "rss"
     assert len(root.findall("channel/item")) == 1
+
+
+def test_static_cover_served(env):
+    from fastapi.testclient import TestClient
+
+    from app.main import app
+
+    with TestClient(app) as client:
+        response = client.get("/static/cover.png")
+
+    assert response.status_code == 200
+    assert "image/png" in response.headers["content-type"]

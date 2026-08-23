@@ -120,6 +120,16 @@ For phone listening on the same LAN, set `BASE_URL` to your computer's LAN IP
 setup). There is no authentication on the feed or the UI — it's intended for
 local-network use only.
 
+## Cover art
+
+The podcast uses a single cover image for the show and for every episode. The
+asset lives at `static/cover.png` (copied from `reference/cover.png`, the
+design source) and is served at `{BASE_URL}/static/cover.png`; the feed
+references it via the iTunes image element at both the channel and episode
+level, plus the legacy RSS `<image>` element. The image is 1254×1254, which is
+below Apple Podcasts' 1400px directory minimum, but it's valid RSS and fine
+for self-hosted LAN use.
+
 ## Seeking / range support
 
 Audio is served with **HTTP 206 Partial Content** range support, so podcast
