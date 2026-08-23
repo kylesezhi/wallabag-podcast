@@ -2,7 +2,8 @@
 
 - ``add_random`` pulls unread Wallabag metadata, filters exclusions, and
   stages N random episodes.
-- ``remove_item`` / ``archive_completed`` / ``clear_queue`` manage the queue.
+- ``delete_item`` / ``clear_queue`` manage the queue; deleting a done episode
+  also removes its audio file and processed_articles dedupe row.
 - ``stats`` summarizes the queue for the UI.
 - ``generate_all()`` produces one MP3 per staged episode: fetch the full
   Wallabag entry, clean the HTML into TTS input, synthesize with Kokoro,
@@ -18,13 +19,14 @@ import asyncio
 import logging
 import random
 import sqlite3
+from pathlib import Path
 
 from .config import Settings, get_settings
 from .db import (
     add_processed_article,
-    archive_done_episodes,
     connect,
     delete_episode,
+    delete_processed_article,
     delete_staged_failed_episodes,
     get_episode_status,
     get_processed_wallabag_ids,
@@ -91,36 +93,35 @@ async def add_random(
         conn.close()
 
 
-def remove_item(episode_id: int) -> None:
-    """Delete a staged|failed|generating episode.
+def delete_item(episode_id: int) -> None:
+    """Delete a staged|failed|generating|done episode.
 
-    Does NOT touch processed_articles: removing a staged/failed/generating item
-    lets it be re-picked later. Raises ValueError if the episode is not
-    staged|failed|generating.
+    For done episodes, also unlink the mp3 at audio_path (best-effort) and
+    remove the processed_articles dedupe row so the article is re-pickable.
+    Raises ValueError if not found or non-deletable (archived).
     """
     conn = connect()
     try:
-        rowcount = delete_episode(conn, episode_id)
-        if rowcount == 0:
+        deleted = delete_episode(conn, episode_id)
+        if deleted is None:
             status = get_episode_status(conn, episode_id)
             if status is None:
                 raise ValueError(f"Episode {episode_id} not found")
             raise ValueError(
-                f"Episode {episode_id} is '{status}', cannot remove "
-                "(only staged|failed|generating)"
+                f"Episode {episode_id} is '{status}', cannot delete "
+                "(only staged|failed|generating|done)"
             )
-    finally:
-        conn.close()
-
-
-def archive_completed() -> int:
-    """Set status done->archived for all done episodes. Returns count archived.
-
-    Audio stays on disk and processed_articles rows are untouched.
-    """
-    conn = connect()
-    try:
-        return archive_done_episodes(conn)
+        wallabag_id, audio_path, status = deleted
+        if status == "done":
+            # Remove the dedupe row first so the article is re-pickable
+            # regardless of whether the mp3 unlink succeeds (best-effort disk
+            # cleanup).
+            delete_processed_article(conn, wallabag_id)
+            if audio_path:
+                try:
+                    Path(audio_path).unlink(missing_ok=True)
+                except OSError:
+                    pass
     finally:
         conn.close()
 

@@ -22,7 +22,7 @@ Defaults seeded from .env on first run; updated via the settings UI.
 - `title` TEXT
 - `source` TEXT                  # Wallabag domain_name
 - `url` TEXT                     # original article url
-- `status` TEXT                  # staged | generating | done | failed | archived
+- `status` TEXT                  # staged | generating | done | failed (archived is a legacy status retained for existing rows but no longer set by any UI flow)
 - `audio_path` TEXT              # data/audio/{id}.mp3 (nullable until done)
 - `duration_sec` INTEGER         # real MP3 duration via mutagen (nullable until done)
 - `est_minutes` INTEGER          # Wallabag reading_time, cached for staged stats
@@ -37,25 +37,26 @@ Defaults seeded from .env on first run; updated via the settings UI.
 - `episode_id` INTEGER           # nullable
 - `processed_at` TEXT
 
-A `wallabag_id` is added here ONLY on successful generation, and is never removed by local archive/delete — so an article is never re-picked as a random candidate.
+A `wallabag_id` is added here ONLY on successful generation. Deleting a `done`
+episode removes its `processed_articles` row, so the article becomes re-pickable
+by `add_random`. Removing a `staged`/`failed`/`generating` episode (which never
+recorded a row) does not touch `processed_articles`.
 
 ## Queue state machine
 ```
-staged --(generate)--> generating --(success)--> done --(archive)--> archived
+staged --(generate)--> generating --(success)--> done --(delete)--> ∅
                                    \--(fail)--> failed --(retry)--> generating
                                    \--(cancel)--> failed
 ```
-- **staged:** candidate fetched, no audio yet. Removable via per-item remove (the ⊖ button). Removing a staged item does NOT add it to processed_articles (so it can be re-picked later).
-- **generating:** being synthesized; a task cancellation (Stop) marks it `failed` ("Cancelled by user"). Removable via ⊖ only when no run is active (orphan cleanup); during an active run use the Stop button.
-- **done:** has audio; appears in the RSS feed.
-- **failed:** generation error or user cancellation ("Cancelled by user"); retryable.
-- **archived:** hidden locally, off the feed; audio kept on disk; stays in processed_articles.
+- **staged:** candidate fetched, no audio yet. Deletable via the per-item Delete button. Deleting a staged item does NOT add it to processed_articles (so it can be re-picked later).
+- **generating:** being synthesized; a task cancellation (Stop) marks it `failed` ("Cancelled by user"). Deletable via the Delete button only when no run is active (orphan cleanup); during an active run use the Stop button.
+- **done:** has audio; appears in the RSS feed. Deletable via the per-item Delete button — this unlinks the mp3 and removes the processed_articles row, making the article re-pickable. A confirm prompt guards the delete (irreversible mp3 loss).
+- **failed:** generation error or user cancellation ("Cancelled by user"); retryable. Deletable via the Delete button.
 
 ## Queue ops (pipeline layer)
-- `add_random(n)`: enumerate unread (Wallabag `archive=0, detail=metadata`) excluding EXCLUDE_TAGS (client-side tag filter) and not in processed_articles; pick n random; insert as `staged` with `est_minutes=reading_time`. Idempotent on wallabag_id (skip if already staged/done).
-- `remove_item(id)`: delete `staged`|`failed`|`generating` episode (does not touch processed_articles).
+- `add_random(n)`: enumerate unread (Wallabag `archive=0, detail=metadata`) excluding EXCLUDE_TAGS (client-side tag filter) and not in processed_articles; pick n random; insert as `staged` with `est_minutes=reading_time`. Idempotent on wallabag_id (skip if already staged/done). A previously-deleted done episode's article IS eligible again (its processed_articles row was removed).
+- `delete_item(id)`: delete a `staged`|`failed`|`generating`|`done` episode. For `done` episodes, also unlink the mp3 at `audio_path` (best-effort) and remove the `processed_articles` row so the article is re-pickable. Raises `ValueError` if the episode is missing or `archived` (non-deletable).
 - `stop_generation()`: cancel the active generation task (`app.state.generation_task.cancel()`); the in-flight episode is marked `failed` ("Cancelled by user") by `generate_all`'s CancelledError handler; remaining staged episodes stay `staged`. (Main.py-level op.)
 - `generate_all()`: for each staged → status=generating; clean text; synthesize; write audio; set duration_sec; status=done; insert processed_articles. Continue past per-article failures (mark failed, keep going). A task cancellation aborts the run: the in-flight episode is marked `failed` ("Cancelled by user") and the run halts (remaining staged stay staged).
-- `archive_completed()`: status done→archived for all done.
-- `clear_queue()`: delete staged|failed episodes (and their processed_articles rows for failed only, not done/archived).
+- `clear_queue()`: delete staged|failed episodes (does not touch done episodes or any processed_articles rows).
 - `stats()`: total_minutes (sum est_minutes for staged + duration_sec/60 for done), counts by status, current drive_id.

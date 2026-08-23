@@ -307,24 +307,23 @@ a.queue-item-title:hover {
   color: var(--danger);
 }
 
-.queue-item-remove {
+.queue-item-delete {
   margin: 0;
 }
 
-.btn-remove {
-  border: none;
-  background: var(--tan-light);
-  color: var(--text);
-  width: 2rem;
-  height: 2rem;
-  border-radius: 50%;
-  font-size: 1.1rem;
-  line-height: 1;
+.btn-delete {
+  background: transparent;
+  border: 1.5px solid var(--danger);
+  color: var(--danger);
+  padding: 0.3rem 0.7rem;
+  border-radius: 8px;
+  font-size: 0.8rem;
+  font-weight: 600;
   cursor: pointer;
 }
 
-.btn-remove:hover {
-  background: var(--tan);
+.btn-delete:hover {
+  background: var(--danger);
   color: #fff;
 }
 

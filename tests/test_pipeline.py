@@ -1,7 +1,7 @@
 """Tests for the episode generation pipeline and queue operations.
 
 Focus is state transitions and per-episode error isolation for generate_all(),
-plus the add_random / remove_item / archive_completed / clear_queue / stats
+plus the add_random / delete_item / clear_queue / stats
 queue operations. Real clients are built on httpx.MockTransport (Wallabag +
 Kokoro) and measure_duration is monkeypatched so no real MP3 files are needed.
 """
@@ -18,10 +18,9 @@ from app.db import add_processed_article, get_db_path, init_db
 from app.kokoro import KokoroClient
 from app.pipeline import (
     add_random,
-    archive_completed,
     clear_queue,
+    delete_item,
     generate_all,
-    remove_item,
     stats,
 )
 from app.wallabag import WallabagClient
@@ -386,11 +385,11 @@ async def test_no_staged_episodes_returns_empty_summary(env, monkeypatch):
 # ---------------------------------------------------------------------------
 
 
-def test_remove_item_generating(env):
+def test_delete_item_generating(env):
     with sqlite3.connect(get_db_path()) as conn:
         episode_id = _insert_episode(conn, 1, "Article One", status="generating")
 
-    remove_item(episode_id)
+    delete_item(episode_id)
 
     with sqlite3.connect(get_db_path()) as conn:
         row = conn.execute("SELECT id FROM episodes WHERE id=?", (episode_id,)).fetchone()
@@ -595,71 +594,108 @@ async def test_add_random_idempotent(env, monkeypatch):
 
 
 # ---------------------------------------------------------------------------
-# Queue operations: remove_item
+# Queue operations: delete_item
 # ---------------------------------------------------------------------------
 
 
-def test_remove_item_staged(env):
+def test_delete_item_staged(env):
     with sqlite3.connect(get_db_path()) as conn:
         episode_id = _insert_episode(conn, 1, "Article One", status="staged")
 
-    remove_item(episode_id)
+    delete_item(episode_id)
 
     with sqlite3.connect(get_db_path()) as conn:
         row = conn.execute("SELECT id FROM episodes WHERE id=?", (episode_id,)).fetchone()
         assert row is None
 
 
-def test_remove_item_failed(env):
+def test_delete_item_failed(env):
     with sqlite3.connect(get_db_path()) as conn:
         episode_id = _insert_episode(conn, 1, "Article One", status="failed")
 
-    remove_item(episode_id)
+    delete_item(episode_id)
 
     with sqlite3.connect(get_db_path()) as conn:
         row = conn.execute("SELECT id FROM episodes WHERE id=?", (episode_id,)).fetchone()
         assert row is None
 
 
-def test_remove_item_done_raises(env):
+def test_delete_item_done_succeeds(env):
     with sqlite3.connect(get_db_path()) as conn:
         episode_id = _insert_episode(
             conn, 1, "Article One", status="done", duration_sec=60, drive_id=1
         )
+        audio_dir = env / "audio"
+        audio_dir.mkdir(parents=True, exist_ok=True)
+        audio_path = audio_dir / f"{episode_id}.mp3"
+        audio_path.write_bytes(b"0123456789" * 10)
+        conn.execute(
+            "UPDATE episodes SET audio_path=? WHERE id=?",
+            (str(audio_path), episode_id),
+        )
+        conn.execute(
+            "INSERT INTO processed_articles (wallabag_id, episode_id, processed_at) "
+            "VALUES (?, ?, '2026-01-02T00:00:00+00:00')",
+            (1, episode_id),
+        )
+        conn.commit()
 
-    with pytest.raises(ValueError, match="'done'"):
-        remove_item(episode_id)
+    delete_item(episode_id)
 
     with sqlite3.connect(get_db_path()) as conn:
-        row = conn.execute("SELECT status FROM episodes WHERE id=?", (episode_id,)).fetchone()
-        assert row[0] == "done"
+        row = conn.execute("SELECT id FROM episodes WHERE id=?", (episode_id,)).fetchone()
+        assert row is None
+        assert _processed_ids(conn) == []
+    assert audio_path.exists() is False
 
 
-def test_remove_item_missing_raises(env):
+def test_delete_item_done_swallows_missing_mp3(env):
+    with sqlite3.connect(get_db_path()) as conn:
+        episode_id = _insert_episode(
+            conn, 1, "Article One", status="done", duration_sec=60, drive_id=1
+        )
+        conn.execute(
+            "UPDATE episodes SET audio_path=? WHERE id=?",
+            (str(env / "audio" / "9999.mp3"), episode_id),
+        )
+        conn.execute(
+            "INSERT INTO processed_articles (wallabag_id, episode_id, processed_at) "
+            "VALUES (?, ?, '2026-01-02T00:00:00+00:00')",
+            (1, episode_id),
+        )
+        conn.commit()
+
+    delete_item(episode_id)
+
+    with sqlite3.connect(get_db_path()) as conn:
+        row = conn.execute("SELECT id FROM episodes WHERE id=?", (episode_id,)).fetchone()
+        assert row is None
+        assert _processed_ids(conn) == []
+
+
+def test_delete_item_missing_raises(env):
     with pytest.raises(ValueError, match="not found"):
-        remove_item(999)
+        delete_item(999)
+
+
+def test_delete_item_archived_raises(env):
+    with sqlite3.connect(get_db_path()) as conn:
+        episode_id = _insert_episode(conn, 1, "Article One", status="archived")
+
+    with pytest.raises(ValueError, match="cannot delete"):
+        delete_item(episode_id)
+
+    with sqlite3.connect(get_db_path()) as conn:
+        row = conn.execute(
+            "SELECT status FROM episodes WHERE id=?", (episode_id,)
+        ).fetchone()
+    assert row is not None
+    assert row[0] == "archived"
 
 
 # ---------------------------------------------------------------------------
-# Queue operations: archive_completed / clear_queue / stats
+# Queue operations: clear_queue / stats
 # ---------------------------------------------------------------------------
-
-
-def test_archive_completed(env):
-    with sqlite3.connect(get_db_path()) as conn:
-        for wallabag_id in (1, 2, 3):
-            _insert_episode(
-                conn, wallabag_id, f"Article {wallabag_id}",
-                status="done", duration_sec=60, drive_id=1,
-            )
-        for wallabag_id in (4, 5):
-            _insert_episode(conn, wallabag_id, f"Article {wallabag_id}", status="staged")
-
-    assert archive_completed() == 3
-
-    with sqlite3.connect(get_db_path()) as conn:
-        statuses = conn.execute("SELECT status FROM episodes ORDER BY id").fetchall()
-        assert [s[0] for s in statuses] == ["archived", "archived", "archived", "staged", "staged"]
 
 
 def test_clear_queue(env):

@@ -233,22 +233,30 @@ def insert_staged_episode(
     conn.commit()
 
 
-def delete_episode(conn: sqlite3.Connection, episode_id: int) -> int:
-    """Delete a staged|failed|generating episode by id. Return rowcount (0 or 1)."""
-    cur = conn.execute(
-        "DELETE FROM episodes WHERE id=? AND status IN "
-        "('staged','failed','generating')",
+def delete_episode(
+    conn: sqlite3.Connection, episode_id: int
+) -> tuple[int, str | None, str] | None:
+    """Delete a staged|failed|generating|done episode by id.
+
+    Returns ``(wallabag_id, audio_path, status)`` for the deleted row, or
+    None when no row matched (unknown id, or the episode is archived).
+    """
+    row = conn.execute(
+        "SELECT wallabag_id, audio_path, status FROM episodes WHERE id=? "
+        "AND status IN ('staged','failed','generating','done')",
         (episode_id,),
-    )
+    ).fetchone()
+    if row is None:
+        return None
+    conn.execute("DELETE FROM episodes WHERE id=?", (episode_id,))
     conn.commit()
-    return cur.rowcount
+    return row[0], row[1], row[2]
 
 
-def archive_done_episodes(conn: sqlite3.Connection) -> int:
-    """Set status done->archived for all done episodes. Return rowcount."""
-    cur = conn.execute("UPDATE episodes SET status='archived' WHERE status='done'")
+def delete_processed_article(conn: sqlite3.Connection, wallabag_id: int) -> None:
+    """Remove a wallabag_id from the processed_articles dedupe index."""
+    conn.execute("DELETE FROM processed_articles WHERE wallabag_id=?", (wallabag_id,))
     conn.commit()
-    return cur.rowcount
 
 
 def delete_staged_failed_episodes(conn: sqlite3.Connection) -> int:

@@ -6,10 +6,10 @@ Scope: feature
 
 Scope: feature
 
-# Cancellable Generation & Removable Generating Episodes
+# Cancellable Generation & Deletable Generating Episodes
 
 ## Goal
-A user can stop a generation run that is in progress (aborting the in-flight TTS synthesis immediately), and can remove any episode stuck in the `generating` status — whether it was stopped mid-run or orphaned by a crash/restart.
+A user can stop a generation run that is in progress (aborting the in-flight TTS synthesis immediately), and can delete any episode stuck in the `generating` status — whether it was stopped mid-run or orphaned by a crash/restart.
 
 ## Cancellation model
 
@@ -27,36 +27,38 @@ A user can stop a generation run that is in progress (aborting the in-flight TTS
 ### Stop semantics (approved decisions)
 - **Scope:** halt the ENTIRE run — the current episode AND skip all remaining queued episodes (they stay `staged`).
 - **Timing:** immediate — abort the in-flight synthesis, do not let it finish.
-- **Stopped episode state:** `failed` with error `"Cancelled by user"` (visible, retryable, removable via existing ⊖). NOT deleted outright.
+- **Stopped episode state:** `failed` with error `"Cancelled by user"` (visible, retryable, deletable via the Delete button). NOT deleted outright.
 - `processed_articles` is NOT touched for a cancelled episode (same rule as other failures) — so the article can be re-picked/re-generated later.
 
-## Removable `generating` episodes
+## Deletable `generating` episodes
 
-`generating` becomes a removable status, covering two cases:
+`generating` becomes a deletable status, covering two cases:
 
-1. **Orphan (no active run):** episode stuck in `generating` after a crash/restart. `db.delete_episode` allows `'generating'`. The ⊖ button renders on `generating` episodes when no run is active, and the remove route deletes directly.
-2. **Active run, target is the generating episode:** the per-item remove route does NOT delete directly (the loop owns that row). Instead it triggers the same cancellation as the Stop button: `task.cancel()`. The loop marks the episode `failed`, the existing `/queue/status` polling JS reloads the page, and the user then clicks ⊖ on the now-`failed` row.
+1. **Orphan (no active run):** episode stuck in `generating` after a crash/restart. `db.delete_episode` allows `'generating'`. The Delete button renders on `generating` episodes when no run is active, and the delete route deletes directly.
+2. **Active run, target is the generating episode:** the per-item delete route does NOT delete directly (the loop owns that row). Instead it triggers the same cancellation as the Stop button: `task.cancel()`. The loop marks the episode `failed`, the existing `/queue/status` polling JS reloads the page, and the user then clicks Delete on the now-`failed` row.
 
-`done` / `archived` / missing episodes remain non-removable (unchanged ValueError behavior).
+`archived` / missing episodes remain non-deletable (unchanged ValueError behavior); `done` episodes ARE deletable (unlinks mp3 + removes the dedupe row).
 
 ## Routes
 
 - `POST /queue/stop` (NEW): if a generation task is active and not done, `task.cancel()` and redirect to `/` with message `"Stopping generation…"`. If no run is active, redirect with error `"No generation run to stop"`.
-- `POST /queue/{episode_id}/remove` (UPDATED): for a `generating` target during an active run → trigger stop (cancel task), redirect with message `"Stopping generation…"` (the loop will mark it failed; reload shows ⊖). For a `generating` target with no active run → delete directly (orphan cleanup). For `staged`/`failed` → unchanged direct delete. For `done`/`archived`/missing → unchanged ValueError.
+- `POST /queue/{episode_id}/delete` (UPDATED): for a `generating` target during an active run → trigger stop (cancel task), redirect with message `"Stopping generation…"` (the loop will mark it failed; reload shows the Delete button on the now-failed row). For a `generating` target with no active run → delete directly (orphan cleanup). For `staged`/`failed`/`done` → direct delete (for `done`, also unlinks the mp3 and deletes the processed_articles row). For `archived`/missing → `ValueError` (unchanged).
 
 ## UI
 
 - **Global Stop button:** rendered inside the progress card (`#generation-progress`), shown ONLY while `generating` is true. POSTs to `/queue/stop`.
-- **Per-item ⊖ button:** now renders for `staged`, `failed`, AND `generating` — but the `generating` case is gated on `not generating` (no active run). During an active run the generating episode shows just its status badge (use the global Stop button).
-- **No JS change:** `static/js/app.js` already polls `/queue/status` and reloads when `generating` flips false. After a stop, the cancelled episode is already `failed` in the DB by the time `generating` goes false, so the reload shows it with ⊖.
+- **Per-item Delete button:** now renders for `staged`, `failed`, `done`, AND `generating` — but the `generating` case is gated on `not generating` (no active run). During an active run the generating episode shows just its status badge (use the global Stop button). Done-episode delete forms carry a `data-confirm` attribute; a small JS handler calls `confirm()` before submitting (guards irreversible mp3 loss).
+- **JS:** the existing polling logic in `static/js/app.js` is unchanged (polls `/queue/status` and reloads when `generating` flips false). A new small IIFE adds the confirm guard for `form[data-confirm="true"]`. After a stop, the cancelled episode is already `failed` in the DB by the time `generating` goes false, so the reload shows it with a Delete button.
 
 ## Docs
-- `docs/specs/data-model.md`: state machine gains `generating --(cancel)--> failed`; queue-ops section adds `stop_generation()` and notes `remove_item()` allows `generating`.
-- `README.md` "Using the app": document Stop + removing stuck (orphaned generating) episodes.
+- `docs/specs/data-model.md`: state machine gains `generating --(cancel)--> failed`; queue-ops section adds `stop_generation()` and notes `delete_item()` allows `generating` AND `done`.
+- `README.md` "Using the app": document Stop + deleting stuck (orphaned generating) episodes.
 
 ## Acceptance criteria
 - Stop button halts an active run; the in-flight episode ends up `failed` ("Cancelled by user"); remaining staged episodes stay `staged` and can be generated later; `processed_articles` untouched for the cancelled episode.
-- Orphaned `generating` episode (no active run) shows ⊖ and is deletable.
-- Remove-on-active-generating triggers stop (does not delete directly); after reload the episode is `failed` with ⊖.
-- `remove_item` for `done`/`archived`/missing still raises ValueError (unchanged).
-- All existing tests pass; new tests cover in-flight cancel, pre-start cancel, orphan remove, stop route (active + inactive), remove-on-active-generating triggers stop, UI button visibility.
+- Orphaned `generating` episode (no active run) shows a Delete button and is deletable.
+- Delete-on-active-generating triggers stop (does not delete directly); after reload the episode is `failed` with a Delete button.
+- `delete_item` for `archived`/missing still raises `ValueError`; `done` episodes are deletable (mp3 unlinked, processed_articles row removed, article re-pickable).
+- Deleting a `done` episode removes its mp3 from disk and its processed_articles row; a JS `confirm()` prompts before the delete submits.
+- The `archived` status is no longer set by any UI flow; legacy archived rows remain hidden.
+- All existing tests pass; new tests cover in-flight cancel, pre-start cancel, orphan delete, stop route (active + inactive), delete-on-active-generating triggers stop, UI button visibility.

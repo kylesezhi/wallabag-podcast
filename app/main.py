@@ -38,10 +38,9 @@ from .db import (
 from .kokoro import KokoroClient
 from .pipeline import (
     add_random,
-    archive_completed,
     clear_queue,
+    delete_item,
     generate_all,
-    remove_item,
     stats,
 )
 from .rss import build_feed
@@ -290,8 +289,8 @@ async def queue_add_random():
     return _redirect("/", message=f"Added {count} random articles")
 
 
-@app.post("/queue/{episode_id}/remove")
-async def queue_remove(episode_id: int):
+@app.post("/queue/{episode_id}/delete")
+async def queue_delete(episode_id: int):
     conn = connect()
     try:
         status = get_episode_status(conn, episode_id)
@@ -299,17 +298,17 @@ async def queue_remove(episode_id: int):
         conn.close()
     # During an active run the loop owns the generating row: trigger stop
     # instead of deleting; the loop marks it failed and the page reload
-    # (via /queue/status polling) shows the now-failed row with its remove btn.
+    # (via /queue/status polling) shows the now-failed row with its delete btn.
     if status == "generating" and getattr(app.state, "generating", False):
         task = getattr(app.state, "generation_task", None)
         if task is not None and not task.done():
             task.cancel()
         return _redirect("/", message="Stopping generation...")
     try:
-        remove_item(episode_id)
+        delete_item(episode_id)
     except ValueError as exc:
         return _redirect("/", error=str(exc))
-    return _redirect("/", message="Removed from queue")
+    return _redirect("/", message="Deleted from queue")
 
 
 @app.post("/queue/generate")
@@ -334,12 +333,6 @@ async def queue_stop():
         return _redirect("/", error="No generation run to stop")
     task.cancel()
     return _redirect("/", message="Stopping generation...")
-
-
-@app.post("/queue/archive-completed")
-async def queue_archive_completed():
-    count = archive_completed()
-    return _redirect("/", message=f"Archived {count} completed episodes")
 
 
 @app.post("/queue/clear")

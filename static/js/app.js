@@ -39,3 +39,18 @@
 
   setInterval(poll, 2000);
 })();
+
+/* Guard done-episode deletes (irreversible mp3 loss) with a confirm(). */
+(function () {
+  "use strict";
+
+  document.addEventListener("submit", function (event) {
+    var form = event.target;
+    if (form && form.matches && form.matches('form[data-confirm="true"]')) {
+      if (!window.confirm("Delete this episode and its audio file?")) {
+        event.preventDefault();
+        event.stopImmediatePropagation();
+      }
+    }
+  });
+})();

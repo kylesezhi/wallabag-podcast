@@ -353,14 +353,14 @@ def test_add_random_wallabag_error(client, monkeypatch):
     assert "error" in response.headers["location"]
 
 
-def test_remove_staged(client):
+def test_delete_staged(client):
     with sqlite3.connect(get_db_path()) as conn:
-        _insert_staged(conn, [(1, "To Remove")])
+        _insert_staged(conn, [(1, "To Delete")])
         episode_id = conn.execute(
             "SELECT id FROM episodes WHERE wallabag_id=1"
         ).fetchone()[0]
 
-    response = client.post(f"/queue/{episode_id}/remove", follow_redirects=False)
+    response = client.post(f"/queue/{episode_id}/delete", follow_redirects=False)
 
     assert response.status_code == 303
     with sqlite3.connect(get_db_path()) as conn:
@@ -370,27 +370,38 @@ def test_remove_staged(client):
     assert row is None
 
 
-def test_remove_done_fails(client):
+def test_delete_done_succeeds(client, env):
+    audio_path = _write_audio_file(env, 5)
     with sqlite3.connect(get_db_path()) as conn:
-        _insert_done(conn, 5, "Done Article")
+        _insert_done_audio(conn, 5, "Done Article", audio_path)
         episode_id = conn.execute(
             "SELECT id FROM episodes WHERE wallabag_id=5"
         ).fetchone()[0]
+        conn.execute(
+            "INSERT INTO processed_articles (wallabag_id, episode_id, processed_at) "
+            "VALUES (?, ?, '2026-01-02T00:00:00+00:00')",
+            (5, episode_id),
+        )
+        conn.commit()
 
-    response = client.post(f"/queue/{episode_id}/remove", follow_redirects=False)
+    response = client.post(f"/queue/{episode_id}/delete", follow_redirects=False)
 
     assert response.status_code == 303
-    assert "error" in response.headers["location"]
     with sqlite3.connect(get_db_path()) as conn:
         row = conn.execute(
             "SELECT status FROM episodes WHERE id=?", (episode_id,)
         ).fetchone()
-    assert row is not None
-    assert row[0] == "done"
+    assert row is None
+    assert audio_path.exists() is False
+    with sqlite3.connect(get_db_path()) as conn:
+        processed = conn.execute(
+            "SELECT 1 FROM processed_articles WHERE wallabag_id=5"
+        ).fetchone()
+    assert processed is None
 
 
-def test_remove_nonexistent(client):
-    response = client.post("/queue/9999/remove", follow_redirects=False)
+def test_delete_nonexistent(client):
+    response = client.post("/queue/9999/delete", follow_redirects=False)
 
     assert response.status_code == 303
     assert "error" in response.headers["location"]
@@ -416,29 +427,6 @@ def test_generate_starts(client, monkeypatch):
 
     assert response.status_code == 303
     assert "generating" in response.headers["location"]
-
-
-def test_archive_completed(client):
-    with sqlite3.connect(get_db_path()) as conn:
-        _insert_done(conn, 1, "Done One")
-        _insert_done(conn, 2, "Done Two")
-        _insert_staged(conn, [(3, "Still Staged")])
-
-    response = client.post("/queue/archive-completed", follow_redirects=False)
-
-    assert response.status_code == 303
-    with sqlite3.connect(get_db_path()) as conn:
-        statuses = dict(conn.execute("SELECT wallabag_id, status FROM episodes"))
-    assert statuses[1] == "archived"
-    assert statuses[2] == "archived"
-    assert statuses[3] == "staged"
-
-
-def test_archive_completed_empty(client):
-    response = client.post("/queue/archive-completed", follow_redirects=False)
-
-    assert response.status_code == 303
-    assert "message" in response.headers["location"]
 
 
 def test_clear_queue(client):
@@ -532,7 +520,7 @@ def test_stop_active_run(client, monkeypatch):
         app.state.generation_task = None
 
 
-async def test_remove_active_generating_triggers_stop(client):
+async def test_delete_active_generating_triggers_stop(client):
     with sqlite3.connect(get_db_path()) as conn:
         _insert_generating(conn, 42, "In Flight")
         episode_id = conn.execute(
@@ -548,7 +536,7 @@ async def test_remove_active_generating_triggers_stop(client):
     app.state.generating = True
     app.state.generation_task = task
     try:
-        response = client.post(f"/queue/{episode_id}/remove", follow_redirects=False)
+        response = client.post(f"/queue/{episode_id}/delete", follow_redirects=False)
 
         assert response.status_code == 303
         assert "message" in response.headers["location"]
@@ -577,7 +565,7 @@ async def test_remove_active_generating_triggers_stop(client):
                 await task
 
 
-def test_remove_orphan_generating_deletes(client):
+def test_delete_orphan_generating_deletes(client):
     with sqlite3.connect(get_db_path()) as conn:
         _insert_generating(conn, 7, "Orphaned Episode")
         episode_id = conn.execute(
@@ -587,7 +575,7 @@ def test_remove_orphan_generating_deletes(client):
     app.state.generating = False
     app.state.generation_task = None
     try:
-        response = client.post(f"/queue/{episode_id}/remove", follow_redirects=False)
+        response = client.post(f"/queue/{episode_id}/delete", follow_redirects=False)
 
         assert response.status_code == 303
         assert "message" in response.headers["location"]
@@ -636,7 +624,7 @@ def test_stop_button_hidden_when_not_generating(client):
         app.state.generation_task = None
 
 
-def test_remove_button_hidden_for_generating_during_run(client):
+def test_delete_button_hidden_for_generating_during_run(client):
     with sqlite3.connect(get_db_path()) as conn:
         _insert_generating(conn, 42, "In Flight")
         episode_id = conn.execute(
@@ -649,13 +637,13 @@ def test_remove_button_hidden_for_generating_during_run(client):
 
         assert response.status_code == 200
         assert "status-badge-generating" in response.text
-        assert f'action="/queue/{episode_id}/remove"' not in response.text
+        assert f'action="/queue/{episode_id}/delete"' not in response.text
     finally:
         app.state.generating = False
         app.state.generation_task = None
 
 
-def test_remove_button_shown_for_orphan_generating(client):
+def test_delete_button_shown_for_orphan_generating(client):
     with sqlite3.connect(get_db_path()) as conn:
         _insert_generating(conn, 7, "Orphaned Episode")
         episode_id = conn.execute(
@@ -668,13 +656,13 @@ def test_remove_button_shown_for_orphan_generating(client):
         response = client.get("/")
 
         assert response.status_code == 200
-        assert f'action="/queue/{episode_id}/remove"' in response.text
+        assert f'action="/queue/{episode_id}/delete"' in response.text
     finally:
         app.state.generating = False
         app.state.generation_task = None
 
 
-def test_remove_button_shown_for_staged_and_failed(client):
+def test_delete_button_shown_for_staged_and_failed(client):
     with sqlite3.connect(get_db_path()) as conn:
         _insert_staged(conn, [(1, "Staged Article")])
         _insert_failed(conn, 2, "Failed Article")
@@ -691,11 +679,46 @@ def test_remove_button_shown_for_staged_and_failed(client):
         response = client.get("/")
 
         assert response.status_code == 200
-        assert f'action="/queue/{staged_id}/remove"' in response.text
-        assert f'action="/queue/{failed_id}/remove"' in response.text
+        assert f'action="/queue/{staged_id}/delete"' in response.text
+        assert f'action="/queue/{failed_id}/delete"' in response.text
+        # The confirm guard only protects done episodes (irreversible mp3
+        # loss); staged/failed deletes never carry data-confirm.
+        assert response.text.count('data-confirm="true"') == 0
     finally:
         app.state.generating = False
         app.state.generation_task = None
+
+
+def test_delete_button_shown_for_done_with_confirm(client, env):
+    audio_path = _write_audio_file(env, 3)
+    with sqlite3.connect(get_db_path()) as conn:
+        _insert_done_audio(conn, 3, "Finished Episode", audio_path)
+        episode_id = conn.execute(
+            "SELECT id FROM episodes WHERE wallabag_id=3"
+        ).fetchone()[0]
+
+    app.state.generating = False
+    app.state.generation_task = None
+    try:
+        response = client.get("/")
+
+        assert response.status_code == 200
+        assert f'action="/queue/{episode_id}/delete"' in response.text
+        assert "data-confirm" in response.text
+    finally:
+        app.state.generating = False
+        app.state.generation_task = None
+
+
+def test_archive_button_absent(client):
+    with sqlite3.connect(get_db_path()) as conn:
+        _insert_staged(conn, [(1, "Staged Article")])
+        _insert_done(conn, 2, "Done Article")
+
+    response = client.get("/")
+
+    assert response.status_code == 200
+    assert "Archive Completed" not in response.text
 
 
 # ---------------------------------------------------------------------------

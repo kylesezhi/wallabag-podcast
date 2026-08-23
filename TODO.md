@@ -1,4 +1,3 @@
-- rename archive to delete, make it delete audio file
 - add archive in wallabag button to each episode in ui
 - make "copy" button next to link to rss feed
 - Generate New Drive button should be labeled Generate Audio
