@@ -36,6 +36,9 @@
         <span id="progress-done">{{ stats.done + stats.generating }}</span> of
         <span id="progress-total">{{ stats.staged + stats.generating + stats.done + stats.failed }}</span>
       </p>
+      <form method="post" action="/queue/stop">
+        <button type="submit" class="btn btn-block btn-stop">Stop Generating</button>
+      </form>
     </div>
     {% endif %}
 
@@ -75,7 +78,7 @@
             {% endif %}
           </p>
         </div>
-        {% if ep.status in ("staged", "failed") %}
+        {% if ep.status in ("staged", "failed") or (ep.status == "generating" and not generating) %}
         <form method="post" action="/queue/{{ ep.id }}/remove" class="queue-item-remove">
           <button type="submit" class="btn-remove" title="Remove from queue" aria-label="Remove {{ ep.title }}">&#8854;</button>
         </form>

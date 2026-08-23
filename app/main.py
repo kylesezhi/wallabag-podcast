@@ -6,18 +6,20 @@ Serves the server-rendered web UI (queue + settings), the queue action routes,
 a JSON polling endpoint used during generation, and the podcast RSS feed at
 ``/feed.xml``.
 
-Long-running generation runs as a FastAPI BackgroundTask; progress is written
-to SQLite and the UI polls ``/queue/status``.
+Long-running generation runs as an asyncio task (handle on
+``app.state.generation_task``) so it can be cancelled via POST /queue/stop;
+progress is written to SQLite and the UI polls ``/queue/status``.
 """
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
 from urllib.parse import urlencode
 
-from fastapi import BackgroundTasks, FastAPI, Request, Response
+from fastapi import FastAPI, Request, Response
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -26,6 +28,7 @@ from .config import get_settings
 from .db import (
     connect,
     get_db_path,
+    get_episode_status,
     get_queue_episodes,
     get_setting,
     has_staged_episodes,
@@ -71,9 +74,19 @@ async def lifespan(app: FastAPI):
     app.state.wallabag_client = WallabagClient(settings)
     app.state.kokoro_client = KokoroClient(settings)
     app.state.generating = False
+    app.state.generation_task = None
     try:
         yield
     finally:
+        # Cancel and await any lingering generation task so the app exits
+        # cleanly before the shared clients are closed.
+        task = getattr(app.state, "generation_task", None)
+        if task is not None and not task.done():
+            task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
         await app.state.wallabag_client.aclose()
         await app.state.kokoro_client.aclose()
 
@@ -118,6 +131,7 @@ async def _run_generation(app: FastAPI) -> None:
         logger.exception("Generation run crashed")
     finally:
         app.state.generating = False
+        app.state.generation_task = None
 
 
 def _parse_range(range_header: str, file_size: int) -> tuple[int, int] | None:
@@ -278,6 +292,19 @@ async def queue_add_random():
 
 @app.post("/queue/{episode_id}/remove")
 async def queue_remove(episode_id: int):
+    conn = connect()
+    try:
+        status = get_episode_status(conn, episode_id)
+    finally:
+        conn.close()
+    # During an active run the loop owns the generating row: trigger stop
+    # instead of deleting; the loop marks it failed and the page reload
+    # (via /queue/status polling) shows the now-failed row with its remove btn.
+    if status == "generating" and getattr(app.state, "generating", False):
+        task = getattr(app.state, "generation_task", None)
+        if task is not None and not task.done():
+            task.cancel()
+        return _redirect("/", message="Stopping generation...")
     try:
         remove_item(episode_id)
     except ValueError as exc:
@@ -286,7 +313,7 @@ async def queue_remove(episode_id: int):
 
 
 @app.post("/queue/generate")
-async def queue_generate(background_tasks: BackgroundTasks):
+async def queue_generate():
     conn = connect()
     try:
         staged = has_staged_episodes(conn)
@@ -296,8 +323,17 @@ async def queue_generate(background_tasks: BackgroundTasks):
         return _redirect("/", error="No staged articles to generate")
     if getattr(app.state, "generating", False):
         return _redirect("/", error="A generation run is already in progress")
-    background_tasks.add_task(_run_generation, app)
+    app.state.generation_task = asyncio.create_task(_run_generation(app))
     return _redirect("/", message="Now generating your drive")
+
+
+@app.post("/queue/stop")
+async def queue_stop():
+    task = getattr(app.state, "generation_task", None)
+    if task is None or task.done():
+        return _redirect("/", error="No generation run to stop")
+    task.cancel()
+    return _redirect("/", message="Stopping generation...")
 
 
 @app.post("/queue/archive-completed")

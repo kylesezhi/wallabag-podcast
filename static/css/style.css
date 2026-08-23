@@ -216,6 +216,15 @@ body {
   color: var(--tan);
 }
 
+.btn-stop {
+  background: var(--danger);
+  color: #fff;
+}
+
+.btn-stop:hover {
+  background: #7d3021;
+}
+
 /* --- Queue --------------------------------------------------------------------- */
 
 .progress-card {

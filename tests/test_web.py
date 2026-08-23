@@ -7,6 +7,8 @@ methods are async stubs; pipeline functions that run in the background are
 patched at the ``app.main`` import site.
 """
 
+import asyncio
+import contextlib
 import sqlite3
 from pathlib import Path
 
@@ -454,6 +456,246 @@ def test_clear_queue(client):
     assert 2 not in remaining
     assert 3 not in remaining
     assert remaining[4] == "done"
+
+
+# ---------------------------------------------------------------------------
+# Stop generation + removable generating episodes
+# ---------------------------------------------------------------------------
+
+
+def test_stop_no_active_run(client):
+    app.state.generating = False
+    app.state.generation_task = None
+    try:
+        response = client.post("/queue/stop", follow_redirects=False)
+
+        assert response.status_code == 303
+        assert "error" in response.headers["location"]
+    finally:
+        app.state.generating = False
+        app.state.generation_task = None
+
+
+def test_stop_active_run(client, monkeypatch):
+    with sqlite3.connect(get_db_path()) as conn:
+        _insert_staged(conn, [(1, "Parked Article")])
+
+    started = asyncio.Event()
+    release = asyncio.Event()
+
+    async def mock_generate_all(wallabag_client, kokoro_client, settings):
+        started.set()
+        try:
+            await release.wait()
+        except asyncio.CancelledError:
+            # Mirror real generate_all: swallow, return partial summary.
+            return {"total": 1, "done": 0, "failed": 1, "skipped": 0}
+        return {"total": 1, "done": 1, "failed": 0, "skipped": 0}
+
+    monkeypatch.setattr("app.main.generate_all", mock_generate_all)
+
+    app.state.generating = False
+    app.state.generation_task = None
+    try:
+        resp_generate = client.post("/queue/generate", follow_redirects=False)
+        assert resp_generate.status_code == 303
+
+        # Each sync TestClient call pumps the portal's event loop, letting the
+        # scheduled generation task progress to its parked await.
+        for _ in range(20):
+            if started.is_set():
+                break
+            client.get("/health")
+        assert started.is_set()
+
+        resp_stop = client.post("/queue/stop", follow_redirects=False)
+        assert resp_stop.status_code == 303
+        assert "message" in resp_stop.headers["location"]
+
+        # The pending cancel wins over release; the mock swallows it and
+        # returns the partial summary, then _run_generation's finally clears
+        # the handle (generation_task -> None).
+        release.set()
+        for _ in range(20):
+            task = getattr(app.state, "generation_task", None)
+            if task is None or task.done():
+                break
+            client.get("/health")
+        task = getattr(app.state, "generation_task", None)
+        assert task is None or task.done()
+    finally:
+        release.set()
+        task = getattr(app.state, "generation_task", None)
+        if task is not None and not task.done():
+            task.cancel()
+        app.state.generating = False
+        app.state.generation_task = None
+
+
+async def test_remove_active_generating_triggers_stop(client):
+    with sqlite3.connect(get_db_path()) as conn:
+        _insert_generating(conn, 42, "In Flight")
+        episode_id = conn.execute(
+            "SELECT id FROM episodes WHERE wallabag_id=42"
+        ).fetchone()[0]
+
+    parked = asyncio.Event()
+
+    async def _noop_task():
+        await parked.wait()
+
+    task = asyncio.create_task(_noop_task())
+    app.state.generating = True
+    app.state.generation_task = task
+    try:
+        response = client.post(f"/queue/{episode_id}/remove", follow_redirects=False)
+
+        assert response.status_code == 303
+        assert "message" in response.headers["location"]
+
+        # The route called task.cancel(); let the test loop deliver it. A
+        # TimeoutError (not suppressed) means the route failed to cancel.
+        try:
+            await asyncio.wait_for(task, timeout=5)
+        except asyncio.CancelledError:
+            pass
+        assert task.cancelled()
+
+        # The row is NOT deleted — during an active run the loop owns it.
+        with sqlite3.connect(get_db_path()) as conn:
+            row = conn.execute(
+                "SELECT status FROM episodes WHERE id=?", (episode_id,)
+            ).fetchone()
+        assert row is not None
+        assert row[0] == "generating"
+    finally:
+        app.state.generating = False
+        app.state.generation_task = None
+        if not task.done():
+            task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await task
+
+
+def test_remove_orphan_generating_deletes(client):
+    with sqlite3.connect(get_db_path()) as conn:
+        _insert_generating(conn, 7, "Orphaned Episode")
+        episode_id = conn.execute(
+            "SELECT id FROM episodes WHERE wallabag_id=7"
+        ).fetchone()[0]
+
+    app.state.generating = False
+    app.state.generation_task = None
+    try:
+        response = client.post(f"/queue/{episode_id}/remove", follow_redirects=False)
+
+        assert response.status_code == 303
+        assert "message" in response.headers["location"]
+
+        with sqlite3.connect(get_db_path()) as conn:
+            row = conn.execute(
+                "SELECT status FROM episodes WHERE id=?", (episode_id,)
+            ).fetchone()
+        assert row is None
+    finally:
+        app.state.generating = False
+        app.state.generation_task = None
+
+
+# ---------------------------------------------------------------------------
+# UI visibility: Stop button + generating episode remove button
+# ---------------------------------------------------------------------------
+
+
+def test_stop_button_shown_while_generating(client):
+    with sqlite3.connect(get_db_path()) as conn:
+        _insert_staged(conn, [(1, "Queued Article")])
+
+    app.state.generating = True
+    try:
+        response = client.get("/")
+
+        assert response.status_code == 200
+        assert "Stop Generating" in response.text
+        assert 'action="/queue/stop"' in response.text
+    finally:
+        app.state.generating = False
+        app.state.generation_task = None
+
+
+def test_stop_button_hidden_when_not_generating(client):
+    app.state.generating = False
+    app.state.generation_task = None
+    try:
+        response = client.get("/")
+
+        assert response.status_code == 200
+        assert "Stop Generating" not in response.text
+    finally:
+        app.state.generating = False
+        app.state.generation_task = None
+
+
+def test_remove_button_hidden_for_generating_during_run(client):
+    with sqlite3.connect(get_db_path()) as conn:
+        _insert_generating(conn, 42, "In Flight")
+        episode_id = conn.execute(
+            "SELECT id FROM episodes WHERE wallabag_id=42"
+        ).fetchone()[0]
+
+    app.state.generating = True
+    try:
+        response = client.get("/")
+
+        assert response.status_code == 200
+        assert "status-badge-generating" in response.text
+        assert f'action="/queue/{episode_id}/remove"' not in response.text
+    finally:
+        app.state.generating = False
+        app.state.generation_task = None
+
+
+def test_remove_button_shown_for_orphan_generating(client):
+    with sqlite3.connect(get_db_path()) as conn:
+        _insert_generating(conn, 7, "Orphaned Episode")
+        episode_id = conn.execute(
+            "SELECT id FROM episodes WHERE wallabag_id=7"
+        ).fetchone()[0]
+
+    app.state.generating = False
+    app.state.generation_task = None
+    try:
+        response = client.get("/")
+
+        assert response.status_code == 200
+        assert f'action="/queue/{episode_id}/remove"' in response.text
+    finally:
+        app.state.generating = False
+        app.state.generation_task = None
+
+
+def test_remove_button_shown_for_staged_and_failed(client):
+    with sqlite3.connect(get_db_path()) as conn:
+        _insert_staged(conn, [(1, "Staged Article")])
+        _insert_failed(conn, 2, "Failed Article")
+        staged_id = conn.execute(
+            "SELECT id FROM episodes WHERE wallabag_id=1"
+        ).fetchone()[0]
+        failed_id = conn.execute(
+            "SELECT id FROM episodes WHERE wallabag_id=2"
+        ).fetchone()[0]
+
+    app.state.generating = False
+    app.state.generation_task = None
+    try:
+        response = client.get("/")
+
+        assert response.status_code == 200
+        assert f'action="/queue/{staged_id}/remove"' in response.text
+        assert f'action="/queue/{failed_id}/remove"' in response.text
+    finally:
+        app.state.generating = False
+        app.state.generation_task = None
 
 
 # ---------------------------------------------------------------------------

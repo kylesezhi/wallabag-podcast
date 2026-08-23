@@ -14,6 +14,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import random
 import sqlite3
@@ -91,10 +92,11 @@ async def add_random(
 
 
 def remove_item(episode_id: int) -> None:
-    """Delete a staged|failed episode.
+    """Delete a staged|failed|generating episode.
 
-    Does NOT touch processed_articles: removing a staged/failed item lets it
-    be re-picked later. Raises ValueError if the episode is not staged|failed.
+    Does NOT touch processed_articles: removing a staged/failed/generating item
+    lets it be re-picked later. Raises ValueError if the episode is not
+    staged|failed|generating.
     """
     conn = connect()
     try:
@@ -105,7 +107,7 @@ def remove_item(episode_id: int) -> None:
                 raise ValueError(f"Episode {episode_id} not found")
             raise ValueError(
                 f"Episode {episode_id} is '{status}', cannot remove "
-                "(only staged|failed)"
+                "(only staged|failed|generating)"
             )
     finally:
         conn.close()
@@ -188,7 +190,11 @@ async def generate_all(
     A skipped article (cleaned text too short for TTS) counts as failed — its
     episode is marked ``failed`` with a ``"Skipped: ..."`` error and it is not
     recorded in processed_articles — and is additionally tracked in ``skipped``.
-    Per-episode failures never abort the run.
+    Per-episode failures never abort the run. A task cancellation
+    (``task.cancel()``) DOES abort the run: the in-flight episode is marked
+    ``failed`` ("Cancelled by user"), the remaining staged episodes stay
+    ``staged``, and the partial summary is returned normally (the exception is
+    not re-raised).
     """
     settings = settings or get_settings()
     summary = {"total": 0, "done": 0, "failed": 0, "skipped": 0}
@@ -231,6 +237,18 @@ async def generate_all(
                 set_episode_done(conn, episode_id, str(audio_path), duration, drive_id)
                 add_processed_article(conn, wallabag_id, episode_id)
                 summary["done"] += 1
+            except asyncio.CancelledError:
+                # The run was cancelled via task.cancel(): CancelledError is a
+                # BaseException, so the except Exception clause below would not
+                # catch it. Halt the entire run — the in-flight episode is
+                # marked failed (visible, retryable, removable) and the
+                # remaining staged episodes stay staged. Do NOT re-raise: the
+                # caller awaits this task and expects the partial summary, and
+                # _run_generation's finally flips the generating flag.
+                summary["failed"] += 1
+                logger.warning("Episode %s cancelled by user", episode_id)
+                set_episode_failed(conn, episode_id, "Cancelled by user")
+                break
             except SkipArticle as exc:
                 summary["skipped"] += 1
                 summary["failed"] += 1

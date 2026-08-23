@@ -43,16 +43,19 @@ A `wallabag_id` is added here ONLY on successful generation, and is never remove
 ```
 staged --(generate)--> generating --(success)--> done --(archive)--> archived
                                    \--(fail)--> failed --(retry)--> generating
+                                   \--(cancel)--> failed
 ```
 - **staged:** candidate fetched, no audio yet. Removable via per-item remove (the ⊖ button). Removing a staged item does NOT add it to processed_articles (so it can be re-picked later).
+- **generating:** being synthesized; a task cancellation (Stop) marks it `failed` ("Cancelled by user"). Removable via ⊖ only when no run is active (orphan cleanup); during an active run use the Stop button.
 - **done:** has audio; appears in the RSS feed.
-- **failed:** generation error; retryable.
+- **failed:** generation error or user cancellation ("Cancelled by user"); retryable.
 - **archived:** hidden locally, off the feed; audio kept on disk; stays in processed_articles.
 
 ## Queue ops (pipeline layer)
 - `add_random(n)`: enumerate unread (Wallabag `archive=0, detail=metadata`) excluding EXCLUDE_TAGS (client-side tag filter) and not in processed_articles; pick n random; insert as `staged` with `est_minutes=reading_time`. Idempotent on wallabag_id (skip if already staged/done).
-- `remove_item(id)`: delete `staged`|`failed` episode (does not touch processed_articles for staged/failed).
-- `generate_all()`: for each staged → status=generating; clean text; synthesize; write audio; set duration_sec; status=done; insert processed_articles. Continue past per-article failures (mark failed, keep going).
+- `remove_item(id)`: delete `staged`|`failed`|`generating` episode (does not touch processed_articles).
+- `stop_generation()`: cancel the active generation task (`app.state.generation_task.cancel()`); the in-flight episode is marked `failed` ("Cancelled by user") by `generate_all`'s CancelledError handler; remaining staged episodes stay `staged`. (Main.py-level op.)
+- `generate_all()`: for each staged → status=generating; clean text; synthesize; write audio; set duration_sec; status=done; insert processed_articles. Continue past per-article failures (mark failed, keep going). A task cancellation aborts the run: the in-flight episode is marked `failed` ("Cancelled by user") and the run halts (remaining staged stay staged).
 - `archive_completed()`: status done→archived for all done.
 - `clear_queue()`: delete staged|failed episodes (and their processed_articles rows for failed only, not done/archived).
 - `stats()`: total_minutes (sum est_minutes for staged + duration_sec/60 for done), counts by status, current drive_id.

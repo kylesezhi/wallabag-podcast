@@ -98,9 +98,16 @@ the UI or the database, only in `.env`.
 3. Click **Generate New Drive** — each article is fetched, cleaned, and
    synthesized into an MP3. Progress updates live on the page as episodes flip
    from `generating` to `done` (or `failed` with a reason).
-4. When you're happy with the drive, click **Archive Completed** to move
+4. To stop a run in progress — e.g. if synthesis is hung — click **Stop
+   Generating** (shown in the progress card). The in-flight episode is marked
+   `failed` ("Cancelled by user") and the remaining queued episodes stay
+   `staged` so you can generate them later.
+5. When you're happy with the drive, click **Archive Completed** to move
    finished episodes out of the queue. **Clear Queue** drops the staged/failed
    items without touching completed ones.
+6. An episode can get stuck in `generating` if the process is restarted
+   mid-run. Its ⊖ button appears when no run is active, so you can remove it
+   like any `staged`/`failed` item.
 
 ## Subscribing in a podcast app
 

@@ -234,9 +234,10 @@ def insert_staged_episode(
 
 
 def delete_episode(conn: sqlite3.Connection, episode_id: int) -> int:
-    """Delete a staged|failed episode by id. Return rowcount (0 or 1)."""
+    """Delete a staged|failed|generating episode by id. Return rowcount (0 or 1)."""
     cur = conn.execute(
-        "DELETE FROM episodes WHERE id=? AND status IN ('staged','failed')",
+        "DELETE FROM episodes WHERE id=? AND status IN "
+        "('staged','failed','generating')",
         (episode_id,),
     )
     conn.commit()

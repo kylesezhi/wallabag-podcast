@@ -6,6 +6,7 @@ queue operations. Real clients are built on httpx.MockTransport (Wallabag +
 Kokoro) and measure_duration is monkeypatched so no real MP3 files are needed.
 """
 
+import asyncio
 import json
 import sqlite3
 
@@ -378,6 +379,107 @@ async def test_no_staged_episodes_returns_empty_summary(env, monkeypatch):
     summary = await generate_all(wallabag, kokoro, settings=get_settings())
 
     assert summary == {"total": 0, "done": 0, "failed": 0, "skipped": 0}
+
+
+# ---------------------------------------------------------------------------
+# generate_all cancellation + removable generating episodes
+# ---------------------------------------------------------------------------
+
+
+def test_remove_item_generating(env):
+    with sqlite3.connect(get_db_path()) as conn:
+        episode_id = _insert_episode(conn, 1, "Article One", status="generating")
+
+    remove_item(episode_id)
+
+    with sqlite3.connect(get_db_path()) as conn:
+        row = conn.execute("SELECT id FROM episodes WHERE id=?", (episode_id,)).fetchone()
+        assert row is None
+
+
+async def test_generate_cancelled_mid_flight(env, monkeypatch):
+    with sqlite3.connect(get_db_path()) as conn:
+        _insert_staged(conn, [(1, "Article One"), (2, "Article Two")])
+
+    wallabag = _make_wallabag(_wallabag_ok_handler())
+
+    kokoro_calls = []
+
+    def kokoro_handler(request: httpx.Request) -> httpx.Response:
+        kokoro_calls.append(request)
+        if len(kokoro_calls) == 1:
+            # Raise from the mock transport: this propagates out of
+            # `await kokoro_client.synthesize(...)` (CancelledError is a
+            # BaseException, so KokoroClient's except clauses don't catch it).
+            raise asyncio.CancelledError()
+        return httpx.Response(200, content=b"FAKE_MP3")
+
+    kokoro = _make_kokoro(kokoro_handler)
+    monkeypatch.setattr("app.pipeline.measure_duration", lambda audio_path: 60)
+
+    summary = await generate_all(wallabag, kokoro, settings=get_settings())
+
+    # The in-flight episode is marked failed and the run halts: episode 2
+    # stays staged and is never fetched/synthesized.
+    assert summary == {"total": 2, "done": 0, "failed": 1, "skipped": 0}
+
+    with sqlite3.connect(get_db_path()) as conn:
+        episodes = _episode_rows(conn)
+        assert episodes[0]["status"] == "failed"
+        assert episodes[0]["error"] == "Cancelled by user"
+        assert episodes[1]["status"] == "staged"
+        assert episodes[1]["error"] is None
+        # Cancellation does not touch processed_articles (same rule as other
+        # failures): the article can be re-picked/generated later.
+        assert _processed_ids(conn) == []
+
+    # No audio written: the cancel landed at the kokoro await, before
+    # audio_path.write_bytes was reached.
+    assert (env / "audio" / "1.mp3").exists() is False
+
+
+async def test_generate_cancelled_before_first_await(env, monkeypatch):
+    with sqlite3.connect(get_db_path()) as conn:
+        _insert_staged(conn, [(1, "Article One"), (2, "Article Two")])
+
+    wallabag = _make_wallabag(_wallabag_ok_handler())
+    kokoro = _make_kokoro(lambda request: httpx.Response(200, content=b"FAKE_MP3"))
+    monkeypatch.setattr("app.pipeline.measure_duration", lambda audio_path: 60)
+
+    # Gate the first wallabag fetch so the task parks at an await inside the
+    # loop, then deliver the cancel externally via task.cancel() — proving a
+    # real task cancellation propagates into generate_all.
+    entered = asyncio.Event()
+    release = asyncio.Event()
+    original_get_entry = WallabagClient.get_entry
+
+    async def gated_get_entry(self, entry_id):
+        entered.set()
+        await release.wait()
+        return await original_get_entry(self, entry_id)
+
+    monkeypatch.setattr("app.pipeline.WallabagClient.get_entry", gated_get_entry)
+
+    task = asyncio.create_task(
+        generate_all(wallabag, kokoro, settings=get_settings())
+    )
+    await entered.wait()  # the task is now parked at release.wait()
+    task.cancel()
+    release.set()  # irrelevant now — the pending cancel wins
+    # generate_all swallows CancelledError internally, so awaiting the task
+    # returns the partial summary normally (it does not raise).
+    summary = await task
+
+    assert summary == {"total": 2, "done": 0, "failed": 1, "skipped": 0}
+
+    with sqlite3.connect(get_db_path()) as conn:
+        episodes = _episode_rows(conn)
+        assert episodes[0]["status"] == "failed"
+        assert episodes[0]["error"] == "Cancelled by user"
+        assert episodes[1]["status"] == "staged"
+        assert _processed_ids(conn) == []
+
+    assert (env / "audio" / "1.mp3").exists() is False
 
 
 # ---------------------------------------------------------------------------
