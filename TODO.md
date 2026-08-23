@@ -2,5 +2,4 @@
 - make "copy" button next to link to rss feed
 - 1 mins - shouldn't be plural
 - birthday shoutouts
-- clear queue - > clear incomplete 
 - Add Random button should specify how many get added

@@ -107,7 +107,7 @@ the UI or the database, only in `.env`.
    to remove it from the feed and delete its MP3 file — you'll get a quick
    confirm prompt first since the audio is gone for good. Deleting an episode
    also lets its Wallabag article be picked again by **Add Random** later.
-   **Clear Queue** drops the staged/failed items without touching completed
+   **Clear Staged** drops the staged/failed items without touching completed
    ones.
 6. An episode can get stuck in `generating` if the process is restarted
    mid-run. Its **Delete** button appears when no run is active, so you can
