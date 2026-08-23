@@ -18,7 +18,7 @@ from pathlib import Path
 from urllib.parse import urlencode
 
 from fastapi import BackgroundTasks, FastAPI, Request, Response
-from fastapi.responses import JSONResponse, RedirectResponse
+from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
@@ -53,6 +53,9 @@ templates = Jinja2Templates(directory=_BASE_DIR / "templates")
 # Allowed range for the articles_per_drive UI tunable.
 _ARTICLES_PER_DRIVE_MIN = 1
 _ARTICLES_PER_DRIVE_MAX = 50
+
+# Chunk size when streaming a byte range of an audio file (206 responses).
+_AUDIO_CHUNK_SIZE = 64 * 1024
 
 
 @asynccontextmanager
@@ -115,6 +118,58 @@ async def _run_generation(app: FastAPI) -> None:
         logger.exception("Generation run crashed")
     finally:
         app.state.generating = False
+
+
+def _parse_range(range_header: str, file_size: int) -> tuple[int, int] | None:
+    """Parse a single byte range from a Range header.
+
+    Returns the inclusive (start, end) pair, or None when the header is not
+    a usable single-range request. Supports open-ended ranges (``bytes=500-``
+    = from byte 500 to EOF) and suffix ranges (``bytes=-500`` = the last 500
+    bytes). The end is clamped to ``file_size - 1`` and a suffix longer than
+    the file returns the whole file. Returns None when the range cannot be
+    satisfied (start >= file_size, or start > end). Multi-range requests are
+    collapsed to their first range.
+    """
+    if not range_header or file_size <= 0:
+        return None
+    # Only the "bytes" unit is supported; ignore everything else.
+    if not range_header.startswith("bytes="):
+        return None
+    # RFC 7233 allows ignoring a multi-range request, so only the first
+    # range is parsed and served.
+    spec = range_header.removeprefix("bytes=").split(",", 1)[0].strip()
+    start_s, _, end_s = spec.partition("-")
+    if start_s == "" and end_s == "":
+        return None
+
+    if start_s == "":
+        # Suffix range: the last N bytes of the file.
+        try:
+            suffix = int(end_s)
+        except ValueError:
+            return None
+        if suffix <= 0:
+            return None
+        start = max(0, file_size - suffix)
+        end = file_size - 1
+    else:
+        try:
+            start = int(start_s)
+        except ValueError:
+            return None
+        if end_s == "":
+            end = file_size - 1
+        else:
+            try:
+                end = int(end_s)
+            except ValueError:
+                return None
+            end = min(end, file_size - 1)
+
+    if start < 0 or start >= file_size or start > end:
+        return None
+    return start, end
 
 
 # ---------------------------------------------------------------------------
@@ -335,3 +390,64 @@ async def health() -> dict[str, str]:
 @app.get("/feed.xml")
 async def feed() -> Response:
     return Response(content=build_feed(), media_type="application/rss+xml; charset=utf-8")
+
+
+@app.get("/audio/{episode_id}.mp3")
+async def audio(episode_id: int, request: Request) -> Response:
+    """Serve a generated episode MP3, honoring HTTP Range requests.
+
+    Podcast apps issue byte-range requests to seek/scrub; a 206 Partial
+    Content response with the requested slice lets them do so. Without a
+    Range header the whole file is returned as 200. The episode's
+    ``audio_path`` is looked up directly because db.py has no per-episode
+    audio_path getter (kept inline to avoid expanding the repository).
+    """
+    conn = connect()
+    try:
+        row = conn.execute(
+            "SELECT audio_path FROM episodes WHERE id=?", (episode_id,)
+        ).fetchone()
+    finally:
+        conn.close()
+    if row is None or not row[0]:
+        return Response(status_code=404)
+
+    audio_path = Path(row[0])
+    if not audio_path.is_file():
+        return Response(status_code=404)
+    file_size = audio_path.stat().st_size
+
+    headers = {"Accept-Ranges": "bytes"}
+    range_header = request.headers.get("range")
+    if not range_header:
+        return FileResponse(audio_path, media_type="audio/mpeg", headers=headers)
+
+    parsed = _parse_range(range_header, file_size)
+    if parsed is None:
+        return Response(
+            status_code=416,
+            headers={"Content-Range": f"bytes */{file_size}"},
+        )
+
+    start, end = parsed
+    length = end - start + 1
+    headers["Content-Range"] = f"bytes {start}-{end}/{file_size}"
+    headers["Content-Length"] = str(length)
+
+    async def _iter_chunks():
+        with audio_path.open("rb") as audio_file:
+            audio_file.seek(start)
+            remaining = length
+            while remaining > 0:
+                chunk = audio_file.read(min(_AUDIO_CHUNK_SIZE, remaining))
+                if not chunk:
+                    break
+                remaining -= len(chunk)
+                yield chunk
+
+    return StreamingResponse(
+        _iter_chunks(),
+        status_code=206,
+        media_type="audio/mpeg",
+        headers=headers,
+    )

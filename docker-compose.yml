@@ -1,0 +1,24 @@
+services:
+  app:
+    build: .
+    ports:
+      - "8000:8000"
+    env_file: .env
+    environment:
+      # Reachable outside the container (the default binds to 127.0.0.1).
+      HOST: "0.0.0.0"
+      # Inside the compose network Kokoro is reached by service name, not
+      # localhost (the .env default of http://localhost:8880 would fail).
+      KOKORO_BASE_URL: "http://kokoro:8880"
+    volumes:
+      # Persist the SQLite DB and generated audio on the host.
+      - ./data:/app/data
+    depends_on:
+      - kokoro
+    restart: unless-stopped
+
+  kokoro:
+    image: ghcr.io/remsky/kokoro-fastapi-cpu:latest
+    ports:
+      - "8880:8880"
+    restart: unless-stopped

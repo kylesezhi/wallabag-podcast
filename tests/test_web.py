@@ -8,6 +8,7 @@ patched at the ``app.main`` import site.
 """
 
 import sqlite3
+from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
@@ -87,6 +88,40 @@ def _insert_failed(conn: sqlite3.Connection, wallabag_id: int, title: str) -> No
             title,
             f"example.com/{wallabag_id}",
             f"https://example.com/{wallabag_id}",
+        ),
+    )
+    conn.commit()
+
+
+def _write_audio_file(tmp_path: Path, episode_id: int) -> Path:
+    """Write a 100-byte fake MP3 blob under ``tmp_path/audio``.
+
+    Returns the file path so the test can point an episode's audio_path at a
+    real file on disk (mirrors what pipeline.py does for generated episodes).
+    """
+    audio_dir = tmp_path / "audio"
+    audio_dir.mkdir(exist_ok=True)
+    audio_path = audio_dir / f"{episode_id}.mp3"
+    audio_path.write_bytes(b"0123456789" * 10)
+    return audio_path
+
+
+def _insert_done_audio(
+    conn: sqlite3.Connection, wallabag_id: int, title: str, audio_path: Path
+) -> None:
+    """Insert a done episode whose audio_path points at a real file."""
+    conn.execute(
+        "INSERT INTO episodes (wallabag_id, title, source, url, status, "
+        "est_minutes, language, audio_path, duration_sec, drive_id, "
+        "created_at, generated_at) VALUES (?, ?, ?, ?, 'done', 5, 'en', "
+        "?, 300, 1, '2026-01-01T00:00:00+00:00', "
+        "'2026-01-02T00:00:00+00:00')",
+        (
+            wallabag_id,
+            title,
+            f"example.com/{wallabag_id}",
+            f"https://example.com/{wallabag_id}",
+            str(audio_path),
         ),
     )
     conn.commit()
@@ -493,3 +528,86 @@ def test_health_route(client):
 
     assert response.status_code == 200
     assert response.json() == {"status": "ok"}
+
+
+# ---------------------------------------------------------------------------
+# Audio serving (range-aware)
+# ---------------------------------------------------------------------------
+
+
+def test_audio_serves_full_file(client, env):
+    audio_path = _write_audio_file(env, 1)
+    with sqlite3.connect(get_db_path()) as conn:
+        _insert_done_audio(conn, 1, "Audio Episode", audio_path)
+
+    response = client.get("/audio/1.mp3")
+
+    assert response.status_code == 200
+    assert response.headers["content-type"] == "audio/mpeg"
+    assert response.headers["accept-ranges"] == "bytes"
+    assert response.content == audio_path.read_bytes()
+
+
+def test_audio_serves_range(client, env):
+    audio_path = _write_audio_file(env, 1)
+    with sqlite3.connect(get_db_path()) as conn:
+        _insert_done_audio(conn, 1, "Audio Episode", audio_path)
+
+    response = client.get("/audio/1.mp3", headers={"Range": "bytes=0-3"})
+
+    assert response.status_code == 206
+    assert response.headers["content-type"] == "audio/mpeg"
+    assert response.headers["accept-ranges"] == "bytes"
+    assert response.headers["content-range"] == "bytes 0-3/100"
+    assert response.headers["content-length"] == "4"
+    assert response.content == b"0123"
+
+
+def test_audio_serves_open_ended_range(client, env):
+    audio_path = _write_audio_file(env, 1)
+    with sqlite3.connect(get_db_path()) as conn:
+        _insert_done_audio(conn, 1, "Audio Episode", audio_path)
+
+    response = client.get("/audio/1.mp3", headers={"Range": "bytes=2-"})
+
+    assert response.status_code == 206
+    assert response.headers["content-range"] == "bytes 2-99/100"
+    assert response.content == audio_path.read_bytes()[2:]
+
+
+def test_audio_serves_suffix_range(client, env):
+    audio_path = _write_audio_file(env, 1)
+    with sqlite3.connect(get_db_path()) as conn:
+        _insert_done_audio(conn, 1, "Audio Episode", audio_path)
+
+    response = client.get("/audio/1.mp3", headers={"Range": "bytes=-4"})
+
+    assert response.status_code == 206
+    assert response.headers["content-range"] == "bytes 96-99/100"
+    assert response.content == audio_path.read_bytes()[-4:]
+
+
+def test_audio_missing_episode_404(client, env):
+    response = client.get("/audio/9999.mp3")
+
+    assert response.status_code == 404
+
+
+def test_audio_missing_file_404(client, env):
+    with sqlite3.connect(get_db_path()) as conn:
+        _insert_done_audio(conn, 1, "Missing File", env / "audio" / "nope.mp3")
+
+    response = client.get("/audio/1.mp3")
+
+    assert response.status_code == 404
+
+
+def test_audio_invalid_range_416(client, env):
+    audio_path = _write_audio_file(env, 1)
+    with sqlite3.connect(get_db_path()) as conn:
+        _insert_done_audio(conn, 1, "Audio Episode", audio_path)
+
+    response = client.get("/audio/1.mp3", headers={"Range": "bytes=999999-"})
+
+    assert response.status_code == 416
+    assert response.headers["content-range"] == "bytes */100"

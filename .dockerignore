@@ -1,0 +1,27 @@
+# VCS
+.git/
+
+# Local virtualenv (uv sync inside the image creates its own)
+.venv/
+
+# Runtime data — keep the directory, exclude its contents
+data/*
+!data/.gitkeep
+
+# Python caches / build artifacts
+__pycache__/
+*.pyc
+.pytest_cache/
+*.egg-info/
+wallabag_podcast.egg-info/
+build/
+dist/
+
+# Tests and docs are not needed in the image
+tests/
+docs/
+reference/
+test-kokoro/
+
+# Secrets — never bake into an image
+.env
