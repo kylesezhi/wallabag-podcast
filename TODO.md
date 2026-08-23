@@ -1,6 +1,5 @@
-- add archive in wallabag button to each episode in ui
+- make archive in wallabag a part of the delete button in ui
 - make "copy" button next to link to rss feed
-- Generate New Drive button should be labeled Generate Audio
 - 1 mins - shouldn't be plural
 - birthday shoutouts
 - clear queue - > clear incomplete 

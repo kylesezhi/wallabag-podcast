@@ -96,7 +96,7 @@ the UI or the database, only in `.env`.
 2. Review the queue and click **Delete** on any article you don't want.
    Deleting a `staged`/`failed` item just drops it from the queue (it can be
    re-picked later).
-3. Click **Generate New Drive** — each article is fetched, cleaned, and
+3. Click **Generate Audio** — each article is fetched, cleaned, and
    synthesized into an MP3. Progress updates live on the page as episodes flip
    from `generating` to `done` (or `failed` with a reason).
 4. To stop a run in progress — e.g. if synthesis is hung — click **Stop
