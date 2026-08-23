@@ -33,8 +33,8 @@
     <div class="card progress-card" id="generation-progress" data-generating="true">
       <p class="progress-text">
         Generating&hellip;
-        <span id="progress-done">{{ stats.done }}</span> of
-        <span id="progress-total">{{ stats.staged + stats.done + stats.failed }}</span> episodes done
+        <span id="progress-done">{{ stats.done + stats.generating }}</span> of
+        <span id="progress-total">{{ stats.staged + stats.generating + stats.done + stats.failed }}</span>
       </p>
     </div>
     {% endif %}

@@ -93,6 +93,21 @@ def _insert_failed(conn: sqlite3.Connection, wallabag_id: int, title: str) -> No
     conn.commit()
 
 
+def _insert_generating(conn: sqlite3.Connection, wallabag_id: int, title: str) -> None:
+    conn.execute(
+        "INSERT INTO episodes (wallabag_id, title, source, url, status, "
+        "est_minutes, language, created_at) VALUES (?, ?, ?, ?, 'generating', "
+        "5, 'en', '2026-01-01T00:00:00+00:00')",
+        (
+            wallabag_id,
+            title,
+            f"example.com/{wallabag_id}",
+            f"https://example.com/{wallabag_id}",
+        ),
+    )
+    conn.commit()
+
+
 def _write_audio_file(tmp_path: Path, episode_id: int) -> Path:
     """Write a 100-byte fake MP3 blob under ``tmp_path/audio``.
 
@@ -215,6 +230,28 @@ def test_home_shows_failed_with_error(client):
     assert "Broken Article" in response.text
     assert "failed" in response.text.lower()
     assert "some error" in response.text
+
+
+def test_home_progress_counts_generating_episode(client):
+    app.state.generating = True
+    try:
+        with sqlite3.connect(get_db_path()) as conn:
+            _insert_generating(conn, 100, "Mid Synthesis")
+            _insert_staged(
+                conn, [(101, "Staged One"), (102, "Staged Two"), (103, "Staged Three"),
+                       (104, "Staged Four"), (105, "Staged Five")]
+            )
+            _insert_done(conn, 106, "Finished Episode")
+            _insert_failed(conn, 107, "Broken Article")
+
+        response = client.get("/")
+
+        assert response.status_code == 200
+        assert 'id="progress-done">2<' in response.text
+        assert 'id="progress-total">8<' in response.text
+        assert "episodes done" not in response.text
+    finally:
+        app.state.generating = False
 
 
 # ---------------------------------------------------------------------------

@@ -20,11 +20,11 @@
       var data = await resp.json();
       if (data.stats) {
         if (doneEl) {
-          doneEl.textContent = String(data.stats.done || 0);
+          doneEl.textContent = String((data.stats.done || 0) + (data.stats.generating || 0));
         }
         if (totalEl) {
           totalEl.textContent = String(
-            (data.stats.staged || 0) + (data.stats.done || 0) + (data.stats.failed || 0)
+            (data.stats.staged || 0) + (data.stats.generating || 0) + (data.stats.done || 0) + (data.stats.failed || 0)
           );
         }
       }
