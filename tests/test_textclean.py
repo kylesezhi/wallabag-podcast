@@ -18,6 +18,10 @@ _REQUIRED_ENV = {
     "WALLABAG_CLIENT_SECRET": "test_client_secret",
     "WALLABAG_USERNAME": "test_user",
     "WALLABAG_PASSWORD": "test_pass",
+    # Pin an empty map so tests relying on Settings defaults cannot leak
+    # values from a developer's local .env (read by pydantic-settings as a
+    # fallback source). Tests wanting real pairs setenv them afterwards.
+    "PRONUNCIATIONS": "",
 }
 
 
