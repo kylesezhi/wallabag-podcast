@@ -1,3 +1,4 @@
 - websocket connection instead of polling
 - the save button in settings has to go - save automatically
+- progress bar during generation
 - birthday shoutouts
