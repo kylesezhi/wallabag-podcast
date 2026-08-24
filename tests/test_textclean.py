@@ -5,6 +5,7 @@ import pytest
 from app.config import get_settings
 from app.textclean import (
     SkipArticle,
+    apply_pronunciations,
     build_tts_input,
     build_tts_input_from_article,
     clean_body,
@@ -342,6 +343,91 @@ def test_build_tts_input_from_article_default_min_chars_skips_short(monkeypatch)
             build_tts_input_from_article(_article("<p>hi</p>"))
     finally:
         get_settings.cache_clear()
+
+
+# ---------------------------------------------------------------------------
+# 10. pronunciation substitution
+# ---------------------------------------------------------------------------
+
+
+def test_apply_pronunciations_replaces_whole_word():
+    assert (
+        apply_pronunciations("The JSON format is common.", {"JSON": "Jason"})
+        == "The Jason format is common."
+    )
+
+
+def test_apply_pronunciations_case_insensitive():
+    assert (
+        apply_pronunciations("json and JSON and Json", {"JSON": "Jason"})
+        == "Jason and Jason and Jason"
+    )
+
+
+def test_apply_pronunciations_word_boundary():
+    assert (
+        apply_pronunciations("JSONParser parses JSON", {"JSON": "Jason"})
+        == "JSONParser parses Jason"
+    )
+
+
+def test_apply_pronunciations_preserves_punctuation():
+    assert (
+        apply_pronunciations("Use JSON, XML; not CSV.", {"JSON": "Jason", "XML": "X M L"})
+        == "Use Jason, X M L; not CSV."
+    )
+
+
+def test_apply_pronunciations_empty_dict_is_noop():
+    text = "Keep JSON as is."
+    assert apply_pronunciations(text, {}) == text
+
+
+def test_build_tts_input_applies_pronunciations(monkeypatch):
+    _set_required_env(monkeypatch)
+    monkeypatch.setenv("PRONUNCIATIONS", "JSON=Jason,API=A.P.I.")
+    get_settings.cache_clear()
+    try:
+        result = build_tts_input(
+            "JSON guide", "<p>The API uses JSON.</p>", min_chars=0
+        )
+    finally:
+        get_settings.cache_clear()
+    assert result == "[pause:0.5s] Jason guide [pause:1s] The A.P.I. uses Jason."
+
+
+def test_build_tts_input_without_pronunciations_unchanged(monkeypatch):
+    _set_required_env(monkeypatch)
+    get_settings.cache_clear()
+    try:
+        result = build_tts_input("JSON guide", "<p>JSON is great.</p>", min_chars=0)
+    finally:
+        get_settings.cache_clear()
+    assert result == "[pause:0.5s] JSON guide [pause:1s] JSON is great."
+
+
+def test_build_tts_input_pause_tokens_survive_substitution(monkeypatch):
+    # Even a hostile mapping of the literal token words cannot corrupt the
+    # [pause:...] markup: substitution runs on title/body only, before the
+    # tokens are added.
+    _set_required_env(monkeypatch)
+    monkeypatch.setenv("PRONUNCIATIONS", "PAUSE=silence")
+    get_settings.cache_clear()
+    try:
+        result = build_tts_input("Pause talk", "<p>Then pause.</p>", min_chars=0)
+    finally:
+        get_settings.cache_clear()
+    assert result.startswith("[pause:0.5s] ")
+    assert " [pause:1s] " in result
+
+
+def test_apply_pronunciations_multiple_keys_single_pass():
+    assert (
+        apply_pronunciations(
+            "SQL and JSON.", {"SQL": "sequel", "JSON": "Jason"}
+        )
+        == "sequel and Jason."
+    )
 
 
 # ---------------------------------------------------------------------------

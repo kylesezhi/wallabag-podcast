@@ -977,3 +977,45 @@ async def test_generate_all_skips_episode_removed_midrun(env, monkeypatch):
         processed = _processed_ids(conn)
     assert rows == [(1, "done")]
     assert processed == [1]
+
+
+async def test_generate_all_applies_pronunciations(env, monkeypatch):
+    """Configured pronunciations are rewritten before text reaches Kokoro."""
+    monkeypatch.setenv("PRONUNCIATIONS", "JSON=Jason")
+    get_settings.cache_clear()
+
+    def wallabag_handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/oauth/v2/token":
+            return httpx.Response(200, json=_token_response())
+        if request.url.path.startswith("/api/entries/"):
+            entry_id = int(request.url.path.split("/")[3].split(".")[0])
+            content = "<p>" + ("Working with JSON data daily here. " * 10) + "</p>"
+            return httpx.Response(
+                200,
+                json=_entry_payload(entry_id, content, title="The JSON guide"),
+            )
+        return httpx.Response(404)
+
+    kokoro_calls: list[httpx.Request] = []
+
+    def kokoro_handler(request: httpx.Request) -> httpx.Response:
+        kokoro_calls.append(request)
+        return httpx.Response(200, content=b"FAKE_MP3")
+
+    with sqlite3.connect(get_db_path()) as conn:
+        _insert_staged(conn, [(1, "The JSON guide")])
+
+    wallabag = _make_wallabag(wallabag_handler)
+    kokoro = _make_kokoro(kokoro_handler)
+    monkeypatch.setattr("app.pipeline.measure_duration", lambda audio_path: 60)
+
+    try:
+        summary = await generate_all(wallabag, kokoro, settings=get_settings())
+        sent = kokoro_calls[0].content.decode()
+    finally:
+        get_settings.cache_clear()
+
+    assert summary == {"total": 1, "done": 1, "failed": 0, "skipped": 0}
+    assert len(kokoro_calls) == 1
+    assert "Jason" in sent
+    assert "JSON" not in sent

@@ -22,6 +22,27 @@ def _split_tags(value: object) -> object:
     return value
 
 
+def _split_pronunciations(value: object) -> object:
+    """Parse a comma-separated KEY=SPOKEN string into a dict.
+
+    ``"JSON=Jason,API=A.P.I."`` becomes ``{"JSON": "Jason", "API": "A.P.I."}``.
+    Pairs without an "=" (or with an empty key/value) are ignored; values may
+    contain "=" but not ",".
+    """
+    if isinstance(value, str):
+        pronunciations: dict[str, str] = {}
+        for pair in value.split(","):
+            key, sep, spoken = pair.partition("=")
+            if not sep:
+                continue
+            key = key.strip()
+            spoken = spoken.strip()
+            if key and spoken:
+                pronunciations[key] = spoken
+        return pronunciations
+    return value
+
+
 class Settings(BaseSettings):
     """All environment variables for the app (see docs/specs/config-and-env.md)."""
 
@@ -51,6 +72,12 @@ class Settings(BaseSettings):
     MIN_TEXT_CHARS: int = 200
     MAX_FETCH_PAGES: int = 50
     FEED_TITLE: str = "Kyle's Morning Podcast"
+    # NoDecode/BeforeValidator as above; the comma-separated KEY=SPOKEN pairs
+    # become a dict of whole-word, case-insensitive spoken-form rewrites
+    # applied to the TTS text (see app/textclean.py).
+    PRONUNCIATIONS: Annotated[
+        dict[str, str], NoDecode, BeforeValidator(_split_pronunciations)
+    ] = {}
 
 
 # Resolve forward references introduced by `from __future__ import annotations`

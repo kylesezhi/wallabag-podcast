@@ -8,7 +8,8 @@ Kokoro TTS. No LLM, no network. The pipeline:
 3. Extract text with a space separator, unescape residual entities, collapse
    whitespace, drop bare URLs/emails and trailing boilerplate.
 4. Ensure terminal punctuation.
-5. Assemble the exact TTS input ``[pause:0.5s] {title} [pause:1s] {body}``.
+5. Assemble the exact TTS input ``[pause:0.5s] {title} [pause:1s] {body}``,
+   rewriting ``Settings.PRONUNCIATIONS`` whole-word matches first.
 
 Articles whose cleaned body is shorter than ``MIN_TEXT_CHARS`` raise
 :class:`SkipArticle` so the generation pipeline can skip them.
@@ -174,6 +175,47 @@ def _ensure_terminal_punctuation(text: str) -> str:
     return text
 
 
+# Compiled once per distinct pronunciation set; cached because build_tts_input
+# calls apply_pronunciations twice per article with the same dict.
+_PRONUNCIATION_CACHE: dict[tuple[str, ...], re.Pattern[str] | None] = {}
+
+
+def _pronunciation_pattern(
+    pronunciations: dict[str, str],
+) -> re.Pattern[str] | None:
+    """Return a whole-word, case-insensitive regex matching every key.
+
+    Keys are alternated longest-first so overlapping keys prefer the longer
+    match. Returns ``None`` for an empty dict.
+    """
+    cache_key = tuple(sorted(pronunciations))
+    if cache_key in _PRONUNCIATION_CACHE:
+        return _PRONUNCIATION_CACHE[cache_key]
+    pattern: re.Pattern[str] | None = None
+    if pronunciations:
+        keys = sorted(pronunciations, key=len, reverse=True)
+        joined = "|".join(re.escape(key) for key in keys)
+        pattern = re.compile(rf"\b(?:{joined})\b", re.IGNORECASE)
+    _PRONUNCIATION_CACHE[cache_key] = pattern
+    return pattern
+
+
+def apply_pronunciations(text: str, pronunciations: dict[str, str]) -> str:
+    """Rewrite whole-word matches of each key to its spoken form.
+
+    Matching is case-insensitive ("json" and "JSON" both become the value for
+    "JSON"); word boundaries keep larger words intact ("JSONParser" survives).
+    An empty dict returns the text unchanged.
+    """
+    if not text or not pronunciations:
+        return text
+    pattern = _pronunciation_pattern(pronunciations)
+    if pattern is None:  # pragma: no cover - guarded by the empty check above
+        return text
+    lookup = {key.lower(): value for key, value in pronunciations.items()}
+    return pattern.sub(lambda match: lookup[match.group(0).lower()], text)
+
+
 def clean_title(title: str) -> str:
     """Strip HTML from a title, collapse whitespace, and trim. Never raises."""
     try:
@@ -214,13 +256,18 @@ def build_tts_input(title: str, html: str, min_chars: int | None = None) -> str:
     ``[pause:0.5s] {clean_title} [pause:1s] {clean_body}``. When ``min_chars``
     is ``None`` the body is length-guarded with the default
     ``Settings.MIN_TEXT_CHARS`` (raises :class:`SkipArticle`); pass an
-    explicit value to override.
+    explicit value to override. Both title and body pass through
+    :func:`apply_pronunciations` (``Settings.PRONUNCIATIONS``) before
+    assembly, so the ``[pause:...]`` tokens themselves are never rewritten.
     """
     clean = clean_title(title)
     if min_chars is None:
         body = clean_body(html)
     else:
         body = clean_body(html, min_chars=min_chars)
+    pronunciations = get_settings().PRONUNCIATIONS
+    clean = apply_pronunciations(clean, pronunciations)
+    body = apply_pronunciations(body, pronunciations)
     return f"[pause:0.5s] {clean} [pause:1s] {body}"
 
 
