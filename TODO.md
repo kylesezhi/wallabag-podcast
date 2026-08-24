@@ -2,5 +2,5 @@
 - Add Random button should specify how many get added in the text
 - issue: delete is not showing on generating episodes
 - Clear Queue should be named Clear Staged
-- birthday shoutouts
 - delete is not showing on generating episodes
+- birthday shoutouts
