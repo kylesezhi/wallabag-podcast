@@ -3,4 +3,5 @@
 - issue: delete is not showing on generating episodes
 - Clear Queue should be named Clear Staged
 - delete is not showing on generating episodes
+- websocket connection instead of polling
 - birthday shoutouts
