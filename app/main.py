@@ -33,6 +33,7 @@ from .db import (
     get_setting,
     has_staged_episodes,
     init_db,
+    reset_failed_to_staged,
     set_setting,
 )
 from .kokoro import KokoroClient
@@ -342,6 +343,9 @@ async def queue_delete(episode_id: int):
 async def queue_generate():
     conn = connect()
     try:
+        # Failed episodes are retryable: sweep them back into the queue so
+        # Generate Audio picks them up alongside newly staged episodes.
+        reset_failed_to_staged(conn)
         staged = has_staged_episodes(conn)
     finally:
         conn.close()

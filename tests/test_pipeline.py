@@ -14,7 +14,13 @@ import httpx
 import pytest
 
 from app.config import Settings, get_settings
-from app.db import add_processed_article, get_db_path, init_db
+from app.db import (
+    add_processed_article,
+    get_db_path,
+    get_queue_episodes,
+    init_db,
+    reset_failed_to_staged,
+)
 from app.kokoro import KokoroClient
 from app.pipeline import (
     add_random,
@@ -846,3 +852,69 @@ def test_stats_empty_queue(env):
         "archived": 0,
         "drive_id": None,
     }
+
+
+# ---------------------------------------------------------------------------
+# Retry: reset_failed_to_staged
+# ---------------------------------------------------------------------------
+
+
+def test_reset_failed_to_staged(env):
+    with sqlite3.connect(get_db_path()) as conn:
+        _insert_episode(conn, 1, "Article One", status="failed")
+        _insert_episode(conn, 2, "Article Two", status="failed")
+        _insert_episode(conn, 3, "Article Three", status="staged")
+        _insert_episode(conn, 4, "Article Four", status="done", duration_sec=60, drive_id=1)
+        _insert_episode(conn, 5, "Article Five", status="generating")
+        failed_ids = [
+            conn.execute(
+                "SELECT id FROM episodes WHERE wallabag_id=?", (wid,)
+            ).fetchone()[0]
+            for wid in (1, 2)
+        ]
+        for episode_id in failed_ids:
+            conn.execute(
+                "UPDATE episodes SET error='boom' WHERE id=?", (episode_id,)
+            )
+        conn.commit()
+
+    with sqlite3.connect(get_db_path()) as conn:
+        assert reset_failed_to_staged(conn) == 2
+
+    conn = sqlite3.connect(get_db_path())
+    rows = dict(
+        conn.execute("SELECT wallabag_id, status FROM episodes").fetchall()
+    )
+    errors = dict(
+        conn.execute(
+            "SELECT wallabag_id, error FROM episodes WHERE error IS NOT NULL"
+        ).fetchall()
+    )
+    conn.close()
+    assert rows == {1: "staged", 2: "staged", 3: "staged", 4: "done", 5: "generating"}
+    assert errors == {}
+
+
+async def test_generate_all_retries_failed_after_reset(env, monkeypatch):
+    """A failed episode swept back to staged is generated like any other."""
+    with sqlite3.connect(get_db_path()) as conn:
+        _insert_episode(conn, 1, "Article One", status="failed")
+        conn.execute("UPDATE episodes SET error='old failure' WHERE wallabag_id=1")
+        conn.commit()
+        reset_failed_to_staged(conn)
+
+    wallabag = _make_wallabag(_wallabag_ok_handler())
+    kokoro = _make_kokoro(lambda request: httpx.Response(200, content=b"FAKE_MP3"))
+    monkeypatch.setattr("app.pipeline.measure_duration", lambda audio_path: 60)
+
+    summary = await generate_all(wallabag, kokoro, settings=get_settings())
+
+    assert summary == {"total": 1, "done": 1, "failed": 0, "skipped": 0}
+    with sqlite3.connect(get_db_path()) as conn:
+        episodes = get_queue_episodes(conn)
+        processed = conn.execute(
+            "SELECT 1 FROM processed_articles WHERE wallabag_id=1"
+        ).fetchone()
+    assert episodes[0]["status"] == "done"
+    assert episodes[0]["error"] is None
+    assert processed is not None

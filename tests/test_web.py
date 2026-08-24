@@ -279,6 +279,16 @@ def test_home_shows_failed_with_error(client):
     assert "some error" in response.text
 
 
+def test_home_failed_only_shows_ready_to_generate(client):
+    with sqlite3.connect(get_db_path()) as conn:
+        _insert_failed(conn, 20, "Broken Article")
+
+    response = client.get("/")
+
+    assert response.status_code == 200
+    assert "Ready to generate" in response.text
+
+
 def test_home_progress_counts_generating_episode(client):
     app.state.generating = True
     try:
@@ -519,6 +529,44 @@ def test_generate_starts(client, monkeypatch):
 
     assert response.status_code == 303
     assert "generating" in response.headers["location"]
+
+
+def test_generate_retries_failed_only_queue(client):
+    with sqlite3.connect(get_db_path()) as conn:
+        _insert_failed(conn, 7, "Broken Article")
+
+    response = client.post("/queue/generate", follow_redirects=False)
+
+    # The reset happens synchronously in the route: the failed-only queue no
+    # longer bounces with "No staged articles to generate".
+    assert response.status_code == 303
+    assert "error" not in response.headers["location"]
+    with sqlite3.connect(get_db_path()) as conn:
+        row = conn.execute(
+            "SELECT status FROM episodes WHERE wallabag_id=7"
+        ).fetchone()
+    assert row[0] == "staged"
+
+
+def test_generate_sweeps_failed_into_run(client, monkeypatch):
+    with sqlite3.connect(get_db_path()) as conn:
+        _insert_staged(conn, [(1, "Fresh Article")])
+        _insert_failed(conn, 2, "Broken Article")
+
+    async def mock_generate_all(wallabag_client, kokoro_client, settings):
+        return {"total": 2, "done": 2, "failed": 0, "skipped": 0}
+
+    monkeypatch.setattr("app.main.generate_all", mock_generate_all)
+
+    response = client.post("/queue/generate", follow_redirects=False)
+
+    assert response.status_code == 303
+    assert "error" not in response.headers["location"]
+    with sqlite3.connect(get_db_path()) as conn:
+        statuses = dict(
+            conn.execute("SELECT wallabag_id, status FROM episodes").fetchall()
+        )
+    assert statuses == {1: "staged", 2: "staged"}
 
 
 def test_clear_queue(client):

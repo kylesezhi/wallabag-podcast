@@ -98,17 +98,22 @@ the UI or the database, only in `.env`.
 3. Click **Generate Audio** — each article is fetched, cleaned, and
    synthesized into an MP3. Progress updates live on the page as episodes flip
    from `generating` to `done` (or `failed` with a reason).
-4. To stop a run in progress — e.g. if synthesis is hung — click **Stop
+4. Failed episodes are retryable: the next time you click **Generate Audio**,
+   every `failed` episode is swept back into the run alongside newly staged
+   ones (including skipped short-text articles and cancelled episodes — a
+   deterministic skip just re-fails cheaply, without a TTS call). If nothing
+   is staged or failed, you'll see a "No staged articles to generate" notice.
+5. To stop a run in progress — e.g. if synthesis is hung — click **Stop
    Generating** (shown in the progress card). The in-flight episode is marked
    `failed` ("Cancelled by user") and the remaining queued episodes stay
    `staged` so you can generate them later.
-5. When you're happy with the drive, click **Delete** on any finished episode
+6. When you're happy with the drive, click **Delete** on any finished episode
    to remove it from the feed and delete its MP3 file — you'll get a quick
    confirm prompt first since the audio is gone for good. Deleting an episode
    also marks its Wallabag article as read, so **Add Random** won't offer it
    again (archived articles are never re-enumerated). **Clear Staged** drops
    the staged/failed items without touching completed ones.
-6. An episode can get stuck in `generating` if the process is restarted
+7. An episode can get stuck in `generating` if the process is restarted
    mid-run. Its **Delete** button always appears, so you can remove it like
    any other item (marking the article read in Wallabag). Clicking **Delete**
    on the in-flight episode during an active run stops the run first — the

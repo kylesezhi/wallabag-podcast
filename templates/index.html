@@ -6,7 +6,7 @@
       <h1 class="drive-title">Today's Drive</h1>
       <p class="drive-status">
         {% if generating %}Generating your drive&hellip;
-        {% elif stats.staged > 0 %}Ready to generate
+        {% elif stats.staged + stats.failed > 0 %}Ready to generate
         {% elif stats.done > 0 %}Ready to listen
         {% else %}Your queue is empty{% endif %}
       </p>

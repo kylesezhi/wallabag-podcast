@@ -172,6 +172,18 @@ def set_episode_failed(conn: sqlite3.Connection, episode_id: int, error: str) ->
     conn.commit()
 
 
+def reset_failed_to_staged(conn: sqlite3.Connection) -> int:
+    """Re-queue all failed episodes for generation. Return rowcount.
+
+    Clears the recorded error so a retried episode starts clean.
+    """
+    cur = conn.execute(
+        "UPDATE episodes SET status='staged', error=NULL WHERE status='failed'"
+    )
+    conn.commit()
+    return cur.rowcount
+
+
 def add_processed_article(
     conn: sqlite3.Connection, wallabag_id: int, episode_id: int
 ) -> None:
