@@ -1,3 +1,4 @@
+- special pronunciation of JSON
 - websocket connection instead of polling
 - progress bar during generation
 - birthday shoutouts
