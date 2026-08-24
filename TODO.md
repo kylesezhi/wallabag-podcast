@@ -2,3 +2,4 @@
 - Add Random button should specify how many get added
 - birthday shoutouts
 - delete is not showing on generating episodes
+- humanize minutes text
