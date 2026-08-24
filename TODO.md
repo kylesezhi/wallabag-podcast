@@ -4,4 +4,5 @@
 - Clear Queue should be named Clear Staged
 - delete is not showing on generating episodes
 - websocket connection instead of polling
+- Failed articles are a terminal state
 - birthday shoutouts
