@@ -1,4 +1,5 @@
 - websocket connection instead of polling
 - the save button in settings has to go - save automatically
+- issue: when i remove a staged article DURING GENERATION i think it still generates
 - progress bar during generation
 - birthday shoutouts
