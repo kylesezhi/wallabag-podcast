@@ -328,6 +328,9 @@ def test_settings_page(client):
     assert "voice" in response.text.lower()
     assert "connected" in response.text.lower()
     assert "Coming soon" in response.text
+    # Autosave replaced the Save button: status line only, nothing to submit.
+    assert 'id="save-status"' in response.text
+    assert "btn-block" not in response.text
 
 
 def test_settings_page_wallabag_fail(client):
@@ -955,6 +958,36 @@ def test_save_settings_empty_voice(client):
 
     assert response.status_code == 303
     assert "error" in response.headers["location"]
+
+
+def test_save_settings_json_ok(client):
+    response = client.post(
+        "/settings",
+        data={"articles_per_drive": "12", "voice": "af_blossom"},
+        headers={"Accept": "application/json"},
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {"ok": True}
+    with sqlite3.connect(get_db_path()) as conn:
+        assert get_setting(conn, "articles_per_drive") == "12"
+        assert get_setting(conn, "voice") == "af_blossom"
+
+
+def test_save_settings_json_invalid(client):
+    response = client.post(
+        "/settings",
+        data={"articles_per_drive": "abc", "voice": "af_heart"},
+        headers={"Accept": "application/json"},
+    )
+
+    assert response.status_code == 400
+    assert response.json() == {
+        "ok": False,
+        "error": "Articles per drive must be a number",
+    }
+    with sqlite3.connect(get_db_path()) as conn:
+        assert get_setting(conn, "articles_per_drive") != "abc"
 
 
 def test_wallabag_test_ok(client):

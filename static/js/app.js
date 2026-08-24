@@ -57,6 +57,61 @@
   });
 })();
 
+/* Settings autosave: any change inside the settings form posts it via fetch
+ * and reports the outcome in the inline status line (#save-status). */
+(function () {
+  "use strict";
+
+  var form = document.querySelector("form.settings-form");
+  var status = document.getElementById("save-status");
+  if (!form || !status) {
+    return;
+  }
+
+  var saveTimer = null;
+
+  function setStatus(text, className) {
+    status.textContent = text;
+    status.classList.remove("saved", "save-error");
+    if (className) {
+      status.classList.add(className);
+    }
+  }
+
+  form.addEventListener("change", function () {
+    // Debounce slightly so rapid slider releases collapse into one request.
+    clearTimeout(saveTimer);
+    setStatus("Saving…", null);
+    saveTimer = setTimeout(save, 150);
+  });
+
+  async function save() {
+    try {
+      var resp = await fetch("/settings", {
+        method: "POST",
+        headers: { Accept: "application/json" },
+        body: new FormData(form),
+      });
+      if (resp.ok) {
+        setStatus("Saved ✓", "saved");
+        return;
+      }
+      var data = null;
+      try {
+        data = await resp.json();
+      } catch (err) {
+        /* non-JSON body — fall through to generic message */
+      }
+      setStatus(
+        data && data.error ? data.error : "Save failed",
+        "save-error"
+      );
+    } catch (err) {
+      setStatus("Save failed: network error", "save-error");
+    }
+  }
+})();
+
 /* Copy the subscribe URL to the clipboard; falls back to execCommand for
  * plain-HTTP LAN origins where navigator.clipboard is unavailable. */
 (function () {

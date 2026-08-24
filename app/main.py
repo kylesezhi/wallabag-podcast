@@ -400,22 +400,29 @@ async def settings_save(request: Request):
     raw_articles = str(form.get("articles_per_drive", "")).strip()
     voice = str(form.get("voice", "")).strip()
 
+    error: str | None = None
     try:
         articles_per_drive = int(raw_articles)
     except ValueError:
-        return _redirect(
-            "/settings", error="Articles per drive must be a number"
+        error = "Articles per drive must be a number"
+    if error is None and not (
+        _ARTICLES_PER_DRIVE_MIN <= articles_per_drive <= _ARTICLES_PER_DRIVE_MAX
+    ):
+        error = (
+            f"Articles per drive must be between {_ARTICLES_PER_DRIVE_MIN} "
+            f"and {_ARTICLES_PER_DRIVE_MAX}"
         )
-    if not _ARTICLES_PER_DRIVE_MIN <= articles_per_drive <= _ARTICLES_PER_DRIVE_MAX:
-        return _redirect(
-            "/settings",
-            error=(
-                f"Articles per drive must be between {_ARTICLES_PER_DRIVE_MIN} "
-                f"and {_ARTICLES_PER_DRIVE_MAX}"
-            ),
-        )
-    if not voice:
-        return _redirect("/settings", error="Voice must not be empty")
+    if error is None and not voice:
+        error = "Voice must not be empty"
+
+    # The autosave UI posts via fetch and consumes JSON; plain form posts
+    # (no-JS fallback) still get the classic redirect + flash behavior.
+    wants_json = "application/json" in request.headers.get("accept", "")
+
+    if error is not None:
+        if wants_json:
+            return JSONResponse({"ok": False, "error": error}, status_code=400)
+        return _redirect("/settings", error=error)
 
     conn = connect()
     try:
@@ -423,6 +430,8 @@ async def settings_save(request: Request):
         set_setting(conn, "voice", voice)
     finally:
         conn.close()
+    if wants_json:
+        return JSONResponse({"ok": True})
     return _redirect("/settings", message="Settings saved")
 
 
