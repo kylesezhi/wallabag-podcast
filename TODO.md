@@ -1,4 +1,3 @@
 - websocket connection instead of polling
-- issue: when i remove a staged article DURING GENERATION i think it still generates
 - progress bar during generation
 - birthday shoutouts
