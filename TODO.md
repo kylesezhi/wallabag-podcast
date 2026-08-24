@@ -1,3 +1,4 @@
+- chunk the audio so longer files are possible
 - exclude articles with code blocks 
 - websocket connection instead of polling
 - progress bar during generation
