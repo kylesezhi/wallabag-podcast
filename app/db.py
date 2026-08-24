@@ -272,6 +272,14 @@ def get_episode_status(conn: sqlite3.Connection, episode_id: int) -> str | None:
     return row[0] if row is not None else None
 
 
+def get_episode_wallabag_id(conn: sqlite3.Connection, episode_id: int) -> int | None:
+    """Return the episode's wallabag_id, or None if no such episode exists."""
+    row = conn.execute(
+        "SELECT wallabag_id FROM episodes WHERE id=?", (episode_id,)
+    ).fetchone()
+    return int(row[0]) if row is not None else None
+
+
 def get_queue_episodes(conn: sqlite3.Connection) -> list[dict]:
     """Return the visible queue (staged/generating/done/failed), oldest first.
 

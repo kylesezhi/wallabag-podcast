@@ -93,8 +93,8 @@ the UI or the database, only in `.env`.
 1. Open the home page. Click **Add Random** to stage N random unread articles
    (N is set under **Settings** → *Articles per drive*, default 10).
 2. Review the queue and click **Delete** on any article you don't want.
-   Deleting a `staged`/`failed` item just drops it from the queue (it can be
-   re-picked later).
+   Deleting also marks the article as read (archived) in Wallabag — if that
+   fails, nothing is deleted and the episode stays queued so you can retry.
 3. Click **Generate Audio** — each article is fetched, cleaned, and
    synthesized into an MP3. Progress updates live on the page as episodes flip
    from `generating` to `done` (or `failed` with a reason).
@@ -105,13 +105,13 @@ the UI or the database, only in `.env`.
 5. When you're happy with the drive, click **Delete** on any finished episode
    to remove it from the feed and delete its MP3 file — you'll get a quick
    confirm prompt first since the audio is gone for good. Deleting an episode
-   also lets its Wallabag article be picked again by **Add Random** later.
-   **Clear Staged** drops the staged/failed items without touching completed
-   ones.
+   also marks its Wallabag article as read, so **Add Random** won't offer it
+   again (archived articles are never re-enumerated). **Clear Staged** drops
+   the staged/failed items without touching completed ones.
 6. An episode can get stuck in `generating` if the process is restarted
    mid-run. Its **Delete** button appears when no run is active, so you can
-   remove it like any other item. During an active run, use **Stop
-   Generating** instead.
+   remove it like any other item (marking the article read in Wallabag).
+   During an active run, use **Stop Generating** instead.
 
 ## Subscribing in a podcast app
 

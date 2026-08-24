@@ -304,6 +304,17 @@ class WallabagClient:
         payload = resp.json()
         return self._parse_full(payload)
 
+    async def archive(self, entry_id: int) -> None:
+        """Mark an entry as archived (read) in Wallabag."""
+        base = self._settings.WALLABAG_URL.rstrip("/")
+        url = f"{base}/api/entries/{entry_id}.json"
+        resp = await self._request("PATCH", url, data={"archive": "1"})
+        if resp.status_code >= 300:
+            raise WallabagError(
+                f"Wallabag archive of entry {entry_id} failed with status "
+                f"{resp.status_code}: {resp.text[:200]}"
+            )
+
     # -- parsing helpers ----------------------------------------------------
 
     @staticmethod

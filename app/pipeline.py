@@ -2,8 +2,9 @@
 
 - ``add_random`` pulls unread Wallabag metadata, filters exclusions, and
   stages N random episodes.
-- ``delete_item`` / ``clear_queue`` manage the queue; deleting a done episode
-  also removes its audio file and processed_articles dedupe row.
+- ``delete_item`` / ``clear_queue`` manage the queue; deleting an episode
+  first archives its article in Wallabag (aborting on failure), and deleting
+  a done episode also removes its audio file and processed_articles row.
 - ``stats`` summarizes the queue for the UI.
 - ``generate_all()`` produces one MP3 per staged episode: fetch the full
   Wallabag entry, clean the HTML into TTS input, synthesize with Kokoro,
@@ -29,6 +30,7 @@ from .db import (
     delete_processed_article,
     delete_staged_failed_episodes,
     get_episode_status,
+    get_episode_wallabag_id,
     get_processed_wallabag_ids,
     get_staged_episodes,
     get_staged_wallabag_ids,
@@ -93,29 +95,38 @@ async def add_random(
         conn.close()
 
 
-def delete_item(episode_id: int) -> None:
-    """Delete a staged|failed|generating|done episode.
+async def delete_item(episode_id: int, wallabag_client: WallabagClient) -> None:
+    """Archive the article in Wallabag, then delete the episode locally.
 
-    For done episodes, also unlink the mp3 at audio_path (best-effort) and
-    remove the processed_articles dedupe row so the article is re-pickable.
+    The Wallabag archive call happens FIRST: if it fails (connection, auth,
+    or API error) a ``WallabagError`` propagates and nothing is deleted
+    locally. On success the staged|failed|generating|done episode row is
+    deleted; for done episodes local cleanup also unlinks the mp3 at
+    audio_path (best-effort) and removes the processed_articles dedupe row.
     Raises ValueError if not found or non-deletable (archived).
     """
     conn = connect()
     try:
-        deleted = delete_episode(conn, episode_id)
-        if deleted is None:
-            status = get_episode_status(conn, episode_id)
-            if status is None:
-                raise ValueError(f"Episode {episode_id} not found")
+        status = get_episode_status(conn, episode_id)
+        if status is None:
+            raise ValueError(f"Episode {episode_id} not found")
+        if status not in ("staged", "failed", "generating", "done"):
             raise ValueError(
                 f"Episode {episode_id} is '{status}', cannot delete "
                 "(only staged|failed|generating|done)"
             )
-        wallabag_id, audio_path, status = deleted
+        wallabag_id = get_episode_wallabag_id(conn, episode_id)
+        # Archive before deleting anything locally so a failed API call
+        # leaves the queue untouched (abort-on-failure contract).
+        await wallabag_client.archive(wallabag_id)
+
+        deleted = delete_episode(conn, episode_id)
+        if deleted is None:
+            raise ValueError(f"Episode {episode_id} not found")
+        _, audio_path, _ = deleted
         if status == "done":
-            # Remove the dedupe row first so the article is re-pickable
-            # regardless of whether the mp3 unlink succeeds (best-effort disk
-            # cleanup).
+            # Remove the dedupe row first so the article stays consistent
+            # even if the mp3 unlink fails (best-effort disk cleanup).
             delete_processed_article(conn, wallabag_id)
             if audio_path:
                 try:

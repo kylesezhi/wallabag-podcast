@@ -157,6 +157,22 @@ class _MockWallabag:
         pass
 
 
+class _ArchiveSpyWallabag:
+    """Fake wallabag client whose archive() records entry ids and can fail."""
+
+    def __init__(self, error: Exception | None = None):
+        self.archive_calls: list[int] = []
+        self._error = error
+
+    async def archive(self, entry_id: int) -> None:
+        self.archive_calls.append(entry_id)
+        if self._error is not None:
+            raise self._error
+
+    async def aclose(self) -> None:
+        pass
+
+
 class _MockKokoro:
     """Minimal async mock matching KokoroClient's public surface."""
 
@@ -354,6 +370,8 @@ def test_add_random_wallabag_error(client, monkeypatch):
 
 
 def test_delete_staged(client):
+    spy = _ArchiveSpyWallabag()
+    app.state.wallabag_client = spy
     with sqlite3.connect(get_db_path()) as conn:
         _insert_staged(conn, [(1, "To Delete")])
         episode_id = conn.execute(
@@ -363,6 +381,8 @@ def test_delete_staged(client):
     response = client.post(f"/queue/{episode_id}/delete", follow_redirects=False)
 
     assert response.status_code == 303
+    assert "message" in response.headers["location"]
+    assert spy.archive_calls == [1]
     with sqlite3.connect(get_db_path()) as conn:
         row = conn.execute(
             "SELECT status FROM episodes WHERE id=?", (episode_id,)
@@ -371,6 +391,8 @@ def test_delete_staged(client):
 
 
 def test_delete_done_succeeds(client, env):
+    spy = _ArchiveSpyWallabag()
+    app.state.wallabag_client = spy
     audio_path = _write_audio_file(env, 5)
     with sqlite3.connect(get_db_path()) as conn:
         _insert_done_audio(conn, 5, "Done Article", audio_path)
@@ -387,6 +409,7 @@ def test_delete_done_succeeds(client, env):
     response = client.post(f"/queue/{episode_id}/delete", follow_redirects=False)
 
     assert response.status_code == 303
+    assert spy.archive_calls == [5]
     with sqlite3.connect(get_db_path()) as conn:
         row = conn.execute(
             "SELECT status FROM episodes WHERE id=?", (episode_id,)
@@ -400,11 +423,51 @@ def test_delete_done_succeeds(client, env):
     assert processed is None
 
 
+def test_delete_wallabag_error_keeps_episode(client, env):
+    from app.wallabag import WallabagError
+
+    spy = _ArchiveSpyWallabag(error=WallabagError("connection refused"))
+    app.state.wallabag_client = spy
+    audio_path = _write_audio_file(env, 9)
+    with sqlite3.connect(get_db_path()) as conn:
+        _insert_done_audio(conn, 9, "Stuck Article", audio_path)
+        episode_id = conn.execute(
+            "SELECT id FROM episodes WHERE wallabag_id=9"
+        ).fetchone()[0]
+        conn.execute(
+            "INSERT INTO processed_articles (wallabag_id, episode_id, processed_at) "
+            "VALUES (?, ?, '2026-01-02T00:00:00+00:00')",
+            (9, episode_id),
+        )
+        conn.commit()
+
+    response = client.post(f"/queue/{episode_id}/delete", follow_redirects=False)
+
+    # Archive was attempted and failed: error flash + nothing deleted.
+    assert response.status_code == 303
+    assert "error" in response.headers["location"]
+    assert spy.archive_calls == [9]
+    with sqlite3.connect(get_db_path()) as conn:
+        row = conn.execute(
+            "SELECT status FROM episodes WHERE id=?", (episode_id,)
+        ).fetchone()
+        processed = conn.execute(
+            "SELECT 1 FROM processed_articles WHERE wallabag_id=9"
+        ).fetchone()
+    assert row is not None
+    assert row[0] == "done"
+    assert processed is not None
+    assert audio_path.exists() is True
+
+
 def test_delete_nonexistent(client):
+    spy = _ArchiveSpyWallabag()
+    app.state.wallabag_client = spy
     response = client.post("/queue/9999/delete", follow_redirects=False)
 
     assert response.status_code == 303
     assert "error" in response.headers["location"]
+    assert spy.archive_calls == []
 
 
 def test_generate_no_staged(client):
@@ -521,6 +584,8 @@ def test_stop_active_run(client, monkeypatch):
 
 
 async def test_delete_active_generating_triggers_stop(client):
+    spy = _ArchiveSpyWallabag()
+    app.state.wallabag_client = spy
     with sqlite3.connect(get_db_path()) as conn:
         _insert_generating(conn, 42, "In Flight")
         episode_id = conn.execute(
@@ -549,6 +614,9 @@ async def test_delete_active_generating_triggers_stop(client):
             pass
         assert task.cancelled()
 
+        # The stop branch never archives: nothing was deleted.
+        assert spy.archive_calls == []
+
         # The row is NOT deleted — during an active run the loop owns it.
         with sqlite3.connect(get_db_path()) as conn:
             row = conn.execute(
@@ -566,6 +634,8 @@ async def test_delete_active_generating_triggers_stop(client):
 
 
 def test_delete_orphan_generating_deletes(client):
+    spy = _ArchiveSpyWallabag()
+    app.state.wallabag_client = spy
     with sqlite3.connect(get_db_path()) as conn:
         _insert_generating(conn, 7, "Orphaned Episode")
         episode_id = conn.execute(
@@ -579,6 +649,7 @@ def test_delete_orphan_generating_deletes(client):
 
         assert response.status_code == 303
         assert "message" in response.headers["location"]
+        assert spy.archive_calls == [7]
 
         with sqlite3.connect(get_db_path()) as conn:
             row = conn.execute(

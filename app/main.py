@@ -303,10 +303,17 @@ async def queue_delete(episode_id: int):
             task.cancel()
         return _redirect("/", message="Stopping generation...")
     try:
-        delete_item(episode_id)
+        await delete_item(episode_id, app.state.wallabag_client)
     except ValueError as exc:
         return _redirect("/", error=str(exc))
-    return _redirect("/", message="Deleted from queue")
+    except WallabagError as exc:
+        # The Wallabag archive failed before anything was deleted locally:
+        # the episode is still in the queue and can be retried.
+        return _redirect(
+            "/",
+            error=f"Could not mark article as read in Wallabag: {exc}",
+        )
+    return _redirect("/", message="Deleted from queue (article marked read)")
 
 
 @app.post("/queue/generate")

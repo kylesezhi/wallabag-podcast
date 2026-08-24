@@ -38,8 +38,10 @@ Defaults seeded from .env on first run; updated via the settings UI.
 - `processed_at` TEXT
 
 A `wallabag_id` is added here ONLY on successful generation. Deleting a `done`
-episode removes its `processed_articles` row, so the article becomes re-pickable
-by `add_random`. Removing a `staged`/`failed`/`generating` episode (which never
+episode removes its `processed_articles` row (state consistency), but since
+Delete also archives the article in Wallabag, the article will not be re-picked
+by `add_random` anyway — archived entries never appear in the unread
+enumeration. Removing a `staged`/`failed`/`generating` episode (which never
 recorded a row) does not touch `processed_articles`.
 
 ## Queue state machine
@@ -48,14 +50,14 @@ staged --(generate)--> generating --(success)--> done --(delete)--> ∅
                                    \--(fail)--> failed --(retry)--> generating
                                    \--(cancel)--> failed
 ```
-- **staged:** candidate fetched, no audio yet. Deletable via the per-item Delete button. Deleting a staged item does NOT add it to processed_articles (so it can be re-picked later).
+- **staged:** candidate fetched, no audio yet. Deletable via the per-item Delete button (which archives the article in Wallabag first).
 - **generating:** being synthesized; a task cancellation (Stop) marks it `failed` ("Cancelled by user"). Deletable via the Delete button only when no run is active (orphan cleanup); during an active run use the Stop button.
-- **done:** has audio; appears in the RSS feed. Deletable via the per-item Delete button — this unlinks the mp3 and removes the processed_articles row, making the article re-pickable. A confirm prompt guards the delete (irreversible mp3 loss).
+- **done:** has audio; appears in the RSS feed. Deletable via the per-item Delete button — this unlinks the mp3, removes the processed_articles row, and marks the Wallabag article as read. A confirm prompt guards the delete (irreversible mp3 loss + remote archive).
 - **failed:** generation error or user cancellation ("Cancelled by user"); retryable. Deletable via the Delete button.
 
 ## Queue ops (pipeline layer)
-- `add_random(n)`: enumerate unread (Wallabag `archive=0, detail=metadata`) excluding EXCLUDE_TAGS (client-side tag filter) and not in processed_articles; pick n random; insert as `staged` with `est_minutes=reading_time`. Idempotent on wallabag_id (skip if already staged/done). A previously-deleted done episode's article IS eligible again (its processed_articles row was removed).
-- `delete_item(id)`: delete a `staged`|`failed`|`generating`|`done` episode. For `done` episodes, also unlink the mp3 at `audio_path` (best-effort) and remove the `processed_articles` row so the article is re-pickable. Raises `ValueError` if the episode is missing or `archived` (non-deletable).
+- `add_random(n)`: enumerate unread (Wallabag `archive=0, detail=metadata`) excluding EXCLUDE_TAGS (client-side tag filter) and not in processed_articles; pick n random; insert as `staged` with `est_minutes=reading_time`. Idempotent on wallabag_id (skip if already staged/done). Articles deleted via `delete_item` are archived in Wallabag and therefore never re-enumerated.
+- `delete_item(id)`: FIRST archive the episode's article in Wallabag (`PATCH /api/entries/{wallabag_id}.json`, `archive=1`); on failure a `WallabagError` propagates and nothing is deleted locally (abort-on-failure: the episode stays queued and can be retried). On success, delete the `staged`|`failed`|`generating`|`done` row; for `done` episodes also unlink the mp3 at `audio_path` (best-effort) and remove the `processed_articles` row. Raises `ValueError` if the episode is missing or `archived` (non-deletable; no archive call either).
 - `stop_generation()`: cancel the active generation task (`app.state.generation_task.cancel()`); the in-flight episode is marked `failed` ("Cancelled by user") by `generate_all`'s CancelledError handler; remaining staged episodes stay `staged`. (Main.py-level op.)
 - `generate_all()`: for each staged → status=generating; clean text; synthesize; write audio; set duration_sec; status=done; insert processed_articles. Continue past per-article failures (mark failed, keep going). A task cancellation aborts the run: the in-flight episode is marked `failed` ("Cancelled by user") and the run halts (remaining staged stay staged).
 - `clear_queue()`: delete staged|failed episodes (does not touch done episodes or any processed_articles rows).

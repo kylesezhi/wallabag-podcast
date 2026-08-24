@@ -47,7 +47,9 @@
   document.addEventListener("submit", function (event) {
     var form = event.target;
     if (form && form.matches && form.matches('form[data-confirm="true"]')) {
-      if (!window.confirm("Delete this episode and its audio file?")) {
+      var msg = "Delete this episode, remove its audio file, and mark the " +
+        "article as read in Wallabag?";
+      if (!window.confirm(msg)) {
         event.preventDefault();
         event.stopImmediatePropagation();
       }

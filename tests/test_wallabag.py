@@ -10,6 +10,7 @@ from app.wallabag import (
     WallabagAuthError,
     WallabagClient,
     WallabagConnectionError,
+    WallabagError,
 )
 
 WALLABAG_URL = "https://wallabag.example.test"
@@ -292,6 +293,53 @@ def test_get_entry_returns_full_content():
     assert entry.tags == ["ai"]
     assert entry.is_archived is False
     assert entry.is_starred is False
+
+
+# ---------------------------------------------------------------------------
+# 4b. archive (PATCH archive=1)
+# ---------------------------------------------------------------------------
+
+
+def test_archive_sends_patch_with_archive_field():
+    requests = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/oauth/v2/token":
+            return httpx.Response(200, json=_token_response())
+        if request.url.path == "/api/entries/42.json":
+            requests.append(request)
+            return httpx.Response(200, json=_meta_item(42))
+        return httpx.Response(404)
+
+    client = _make_client(handler)
+
+    async def _go():
+        await client.archive(42)
+
+    asyncio_run(_go())
+
+    assert len(requests) == 1
+    request = requests[0]
+    assert request.method == "PATCH"
+    assert "Authorization" in request.headers
+    assert "archive=1" in request.content.decode()
+
+
+def test_archive_non_2xx_raises():
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/oauth/v2/token":
+            return httpx.Response(200, json=_token_response())
+        if request.method == "PATCH":
+            return httpx.Response(500, text="boom")
+        return httpx.Response(404)
+
+    client = _make_client(handler)
+
+    async def _go():
+        await client.archive(7)
+
+    with pytest.raises(WallabagError):
+        asyncio_run(_go())
 
 
 # ---------------------------------------------------------------------------

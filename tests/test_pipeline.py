@@ -23,7 +23,7 @@ from app.pipeline import (
     generate_all,
     stats,
 )
-from app.wallabag import WallabagClient
+from app.wallabag import WallabagClient, WallabagError
 
 _REQUIRED_ENV = {
     "WALLABAG_CLIENT_ID": "test_client_id",
@@ -127,6 +127,22 @@ def _wallabag_ok_handler():
                 200,
                 json=_entry_payload(entry_id, _long_content()),
             )
+        return httpx.Response(404)
+
+    return handler
+
+
+def _archive_handler(record: list, fail: bool = False):
+    """Wallabag handler that records PATCH archive calls; 500 when failing."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/oauth/v2/token":
+            return httpx.Response(200, json=_token_response())
+        if request.method == "PATCH" and request.url.path.startswith("/api/entries/"):
+            record.append(request)
+            if fail:
+                return httpx.Response(500, text="boom")
+            return httpx.Response(200, json={})
         return httpx.Response(404)
 
     return handler
@@ -385,15 +401,18 @@ async def test_no_staged_episodes_returns_empty_summary(env, monkeypatch):
 # ---------------------------------------------------------------------------
 
 
-def test_delete_item_generating(env):
+async def test_delete_item_generating(env):
+    record = []
+    wallabag = _make_wallabag(_archive_handler(record))
     with sqlite3.connect(get_db_path()) as conn:
         episode_id = _insert_episode(conn, 1, "Article One", status="generating")
 
-    delete_item(episode_id)
+    await delete_item(episode_id, wallabag)
 
     with sqlite3.connect(get_db_path()) as conn:
         row = conn.execute("SELECT id FROM episodes WHERE id=?", (episode_id,)).fetchone()
         assert row is None
+    assert len(record) == 1
 
 
 async def test_generate_cancelled_mid_flight(env, monkeypatch):
@@ -594,33 +613,61 @@ async def test_add_random_idempotent(env, monkeypatch):
 
 
 # ---------------------------------------------------------------------------
-# Queue operations: delete_item
+# Queue operations: delete_item (archives in Wallabag, then deletes locally)
 # ---------------------------------------------------------------------------
 
 
-def test_delete_item_staged(env):
+@pytest.mark.parametrize("status", ["staged", "failed", "generating", "done"])
+async def test_delete_item_archives_wallabag_entry(env, status):
+    record = []
+    wallabag = _make_wallabag(_archive_handler(record))
+    with sqlite3.connect(get_db_path()) as conn:
+        episode_id = _insert_episode(conn, 7, "Article Seven", status=status)
+
+    await delete_item(episode_id, wallabag)
+
+    assert len(record) == 1
+    request = record[0]
+    assert request.method == "PATCH"
+    assert request.url.path == "/api/entries/7.json"
+    assert "archive=1" in request.content.decode()
+
+    with sqlite3.connect(get_db_path()) as conn:
+        row = conn.execute("SELECT id FROM episodes WHERE id=?", (episode_id,)).fetchone()
+        assert row is None
+
+
+async def test_delete_item_staged(env):
+    record = []
+    wallabag = _make_wallabag(_archive_handler(record))
     with sqlite3.connect(get_db_path()) as conn:
         episode_id = _insert_episode(conn, 1, "Article One", status="staged")
 
-    delete_item(episode_id)
+    await delete_item(episode_id, wallabag)
 
     with sqlite3.connect(get_db_path()) as conn:
         row = conn.execute("SELECT id FROM episodes WHERE id=?", (episode_id,)).fetchone()
         assert row is None
+    assert len(record) == 1
 
 
-def test_delete_item_failed(env):
+async def test_delete_item_failed(env):
+    record = []
+    wallabag = _make_wallabag(_archive_handler(record))
     with sqlite3.connect(get_db_path()) as conn:
         episode_id = _insert_episode(conn, 1, "Article One", status="failed")
 
-    delete_item(episode_id)
+    await delete_item(episode_id, wallabag)
 
     with sqlite3.connect(get_db_path()) as conn:
         row = conn.execute("SELECT id FROM episodes WHERE id=?", (episode_id,)).fetchone()
         assert row is None
+    assert len(record) == 1
 
 
-def test_delete_item_done_succeeds(env):
+async def test_delete_item_done_succeeds(env):
+    record = []
+    wallabag = _make_wallabag(_archive_handler(record))
     with sqlite3.connect(get_db_path()) as conn:
         episode_id = _insert_episode(
             conn, 1, "Article One", status="done", duration_sec=60, drive_id=1
@@ -640,16 +687,19 @@ def test_delete_item_done_succeeds(env):
         )
         conn.commit()
 
-    delete_item(episode_id)
+    await delete_item(episode_id, wallabag)
 
     with sqlite3.connect(get_db_path()) as conn:
         row = conn.execute("SELECT id FROM episodes WHERE id=?", (episode_id,)).fetchone()
         assert row is None
         assert _processed_ids(conn) == []
     assert audio_path.exists() is False
+    assert len(record) == 1
 
 
-def test_delete_item_done_swallows_missing_mp3(env):
+async def test_delete_item_done_swallows_missing_mp3(env):
+    record = []
+    wallabag = _make_wallabag(_archive_handler(record))
     with sqlite3.connect(get_db_path()) as conn:
         episode_id = _insert_episode(
             conn, 1, "Article One", status="done", duration_sec=60, drive_id=1
@@ -665,7 +715,7 @@ def test_delete_item_done_swallows_missing_mp3(env):
         )
         conn.commit()
 
-    delete_item(episode_id)
+    await delete_item(episode_id, wallabag)
 
     with sqlite3.connect(get_db_path()) as conn:
         row = conn.execute("SELECT id FROM episodes WHERE id=?", (episode_id,)).fetchone()
@@ -673,17 +723,25 @@ def test_delete_item_done_swallows_missing_mp3(env):
         assert _processed_ids(conn) == []
 
 
-def test_delete_item_missing_raises(env):
+async def test_delete_item_missing_raises(env):
+    record = []
+    wallabag = _make_wallabag(_archive_handler(record))
+
     with pytest.raises(ValueError, match="not found"):
-        delete_item(999)
+        await delete_item(999, wallabag)
+
+    # Nothing was archived: the ValueError fires before any API call.
+    assert record == []
 
 
-def test_delete_item_archived_raises(env):
+async def test_delete_item_archived_raises(env):
+    record = []
+    wallabag = _make_wallabag(_archive_handler(record))
     with sqlite3.connect(get_db_path()) as conn:
         episode_id = _insert_episode(conn, 1, "Article One", status="archived")
 
     with pytest.raises(ValueError, match="cannot delete"):
-        delete_item(episode_id)
+        await delete_item(episode_id, wallabag)
 
     with sqlite3.connect(get_db_path()) as conn:
         row = conn.execute(
@@ -691,6 +749,49 @@ def test_delete_item_archived_raises(env):
         ).fetchone()
     assert row is not None
     assert row[0] == "archived"
+    # Legacy archived rows are never re-archived via the API.
+    assert record == []
+
+
+async def test_delete_item_archive_failure_aborts_delete(env):
+    """A failing Wallabag archive leaves the queue completely untouched."""
+    record = []
+    wallabag = _make_wallabag(_archive_handler(record, fail=True))
+    with sqlite3.connect(get_db_path()) as conn:
+        episode_id = _insert_episode(
+            conn, 5, "Article Five", status="done", duration_sec=60, drive_id=1
+        )
+        audio_dir = env / "audio"
+        audio_dir.mkdir(parents=True, exist_ok=True)
+        audio_path = audio_dir / f"{episode_id}.mp3"
+        audio_path.write_bytes(b"0123456789" * 10)
+        conn.execute(
+            "UPDATE episodes SET audio_path=? WHERE id=?",
+            (str(audio_path), episode_id),
+        )
+        conn.execute(
+            "INSERT INTO processed_articles (wallabag_id, episode_id, processed_at) "
+            "VALUES (?, ?, '2026-01-02T00:00:00+00:00')",
+            (5, episode_id),
+        )
+        conn.commit()
+
+    with pytest.raises(WallabagError):
+        await delete_item(episode_id, wallabag)
+
+    # The archive attempt happened, but nothing was deleted locally.
+    assert len(record) == 1
+    with sqlite3.connect(get_db_path()) as conn:
+        row = conn.execute(
+            "SELECT status, audio_path FROM episodes WHERE id=?", (episode_id,)
+        ).fetchone()
+        assert row is not None
+        assert row[0] == "done"
+        processed = conn.execute(
+            "SELECT 1 FROM processed_articles WHERE wallabag_id=5"
+        ).fetchone()
+    assert processed is not None
+    assert audio_path.exists() is True
 
 
 # ---------------------------------------------------------------------------
