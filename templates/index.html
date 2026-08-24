@@ -21,7 +21,11 @@
         </div>
       </div>
       <form method="post" action="/queue/generate">
+        {% if generating %}
+        <button type="submit" class="btn btn-primary btn-block" disabled aria-busy="true"><span class="spinner" aria-hidden="true"></span>Generating&hellip;</button>
+        {% else %}
         <button type="submit" class="btn btn-primary btn-block">Generate Audio</button>
+        {% endif %}
       </form>
       <form method="post" action="/queue/add-random">
         <button type="submit" class="btn btn-secondary btn-block">Add {{ articles_per_drive }} Random Articles</button>

@@ -197,6 +197,16 @@ body {
   margin-top: 0.6rem;
 }
 
+.btn:disabled,
+.btn:disabled:hover {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.btn-primary:disabled:hover {
+  background: var(--green);
+}
+
 .btn-primary {
   background: var(--green);
   color: #fff;
@@ -229,6 +239,31 @@ body {
 
 .btn-stop:hover {
   background: #7d3021;
+}
+
+.spinner {
+  display: inline-block;
+  width: 1em;
+  height: 1em;
+  margin-right: 0.45rem;
+  vertical-align: -0.125em;
+  border: 2px solid currentColor;
+  border-right-color: transparent;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .spinner {
+    animation: none;
+    opacity: 0.7;
+  }
 }
 
 /* --- Queue --------------------------------------------------------------------- */

@@ -307,8 +307,23 @@ def test_home_progress_counts_generating_episode(client):
         assert 'id="progress-done">2<' in response.text
         assert 'id="progress-total">8<' in response.text
         assert "episodes done" not in response.text
+        # Generate Audio is a non-clickable busy button while a run is active.
+        assert (
+            '<button type="submit" class="btn btn-primary btn-block" disabled aria-busy="true">'
+            in response.text
+        )
+        assert '<span class="spinner" aria-hidden="true"></span>Generating' in response.text
+        assert ">Generate Audio<" not in response.text
     finally:
         app.state.generating = False
+
+
+def test_home_generate_button_enabled_when_idle(client):
+    response = client.get("/")
+
+    assert response.status_code == 200
+    assert '<button type="submit" class="btn btn-primary btn-block">Generate Audio</button>' in response.text
+    assert 'class="spinner"' not in response.text
 
 
 # ---------------------------------------------------------------------------
