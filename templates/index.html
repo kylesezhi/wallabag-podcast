@@ -24,7 +24,7 @@
         <button type="submit" class="btn btn-primary btn-block">Generate Audio</button>
       </form>
       <form method="post" action="/queue/add-random">
-        <button type="submit" class="btn btn-secondary btn-block">Add Random</button>
+        <button type="submit" class="btn btn-secondary btn-block">Add {{ articles_per_drive }} Random Articles</button>
       </form>
     </div>
 
@@ -84,7 +84,7 @@
     </ul>
     {% else %}
     <div class="card queue-empty">
-      <p>No articles in the queue yet — it's empty. Use <strong>Add Random</strong> to stage a few articles.</p>
+      <p>No articles in the queue yet — it's empty. Use <strong>Add {{ articles_per_drive }} Random Articles</strong> to stage a few articles.</p>
     </div>
     {% endif %}
   </section>

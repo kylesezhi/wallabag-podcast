@@ -1,5 +1,4 @@
 - make archive in wallabag a part of the delete button in ui
-- Add Random button should specify how many get added in the text
 - issue: delete is not showing on generating episodes
 - Clear Queue should be named Clear Staged
 - delete is not showing on generating episodes

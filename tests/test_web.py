@@ -196,7 +196,7 @@ def test_home_empty(client):
     assert response.status_code == 200
     assert "Today" in response.text
     assert "Drive" in response.text
-    assert "Add Random" in response.text
+    assert "Add 10 Random Articles" in response.text
     assert "Generate" in response.text
     assert "No articles" in response.text.lower() or "empty" in response.text.lower()
 

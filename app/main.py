@@ -215,6 +215,7 @@ async def home(request: Request, message: str | None = None, error: str | None =
     conn = connect()
     try:
         episodes = get_queue_episodes(conn)
+        articles_per_drive = int(get_setting(conn, "articles_per_drive") or "10")
     finally:
         conn.close()
     settings = get_settings()
@@ -223,6 +224,7 @@ async def home(request: Request, message: str | None = None, error: str | None =
         "index.html",
         {
             "stats": stats(),
+            "articles_per_drive": articles_per_drive,
             "episodes": episodes,
             "generating": bool(getattr(app.state, "generating", False)),
             "message": message,
