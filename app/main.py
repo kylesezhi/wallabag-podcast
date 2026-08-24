@@ -52,6 +52,26 @@ _BASE_DIR = Path(__file__).resolve().parent.parent
 
 templates = Jinja2Templates(directory=_BASE_DIR / "templates")
 
+
+def _human_duration(minutes: int | None) -> str:
+    """Render minutes as full words, e.g. '1 day, 3 hours, 15 minutes'.
+
+    Zero-value units are skipped and units are pluralized correctly;
+    an empty duration renders as '0 minutes'.
+    """
+    minutes = int(minutes or 0)
+    days, rest = divmod(minutes, 1440)
+    hours, mins = divmod(rest, 60)
+    parts = [
+        f"{value} {unit}{'s' if value != 1 else ''}"
+        for value, unit in ((days, "day"), (hours, "hour"), (mins, "minute"))
+        if value
+    ]
+    return ", ".join(parts) if parts else "0 minutes"
+
+
+templates.env.filters["human_duration"] = _human_duration
+
 # Allowed range for the articles_per_drive UI tunable.
 _ARTICLES_PER_DRIVE_MIN = 1
 _ARTICLES_PER_DRIVE_MAX = 50

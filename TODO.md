@@ -4,4 +4,3 @@
 - Clear Queue should be named Clear Staged
 - birthday shoutouts
 - delete is not showing on generating episodes
-- humanize minutes text

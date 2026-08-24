@@ -17,7 +17,7 @@ from fastapi.testclient import TestClient
 
 from app.config import get_settings
 from app.db import connect, get_db_path, get_setting, init_db
-from app.main import app
+from app.main import _human_duration, app
 
 _REQUIRED_ENV = {
     "WALLABAG_CLIENT_ID": "test_client_id",
@@ -235,7 +235,36 @@ def test_home_shows_done_with_duration(client):
     assert response.status_code == 200
     assert "Finished Episode" in response.text
     assert "done" in response.text.lower()
-    assert "5 min" in response.text
+    assert "5 minutes" in response.text
+
+
+@pytest.mark.parametrize(
+    ("minutes", "expected"),
+    [
+        (45, "45 minutes"),
+        (60, "1 hour"),
+        (61, "1 hour, 1 minute"),
+        (125, "2 hours, 5 minutes"),
+        (1440, "1 day"),
+        (1501, "1 day, 1 hour, 1 minute"),
+        (0, "0 minutes"),
+        (None, "0 minutes"),
+    ],
+)
+def test_human_duration_filter(minutes, expected):
+    assert _human_duration(minutes) == expected
+
+
+def test_home_humanizes_drive_total(client):
+    with sqlite3.connect(get_db_path()) as conn:
+        _insert_staged(conn, [(1, "First Article"), (2, "Second Article")])
+        conn.execute("UPDATE episodes SET est_minutes = 90 WHERE wallabag_id IN (1, 2)")
+        conn.commit()
+
+    response = client.get("/")
+
+    assert response.status_code == 200
+    assert "3 hours" in response.text
 
 
 def test_home_shows_failed_with_error(client):
