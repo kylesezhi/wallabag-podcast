@@ -1,6 +1,4 @@
 - make archive in wallabag a part of the delete button in ui
-- Clear Queue should be named Clear Staged
-- delete is not showing on generating episodes
 - websocket connection instead of polling
 - Failed articles are a terminal state
 - too wide ui on mobile 
