@@ -354,7 +354,7 @@ async def queue_generate():
     if getattr(app.state, "generating", False):
         return _redirect("/", error="A generation run is already in progress")
     app.state.generation_task = asyncio.create_task(_run_generation(app))
-    return _redirect("/", message="Now generating your drive")
+    return _redirect("/", message="Now generating audio")
 
 
 @app.post("/queue/stop")
