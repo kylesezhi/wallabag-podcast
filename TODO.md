@@ -1,4 +1,3 @@
-- make archive in wallabag a part of the delete button in ui
 - websocket connection instead of polling
 - Failed articles are a terminal state
 - too wide ui on mobile 
