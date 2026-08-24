@@ -93,18 +93,23 @@ body {
 .home-grid,
 .settings-grid {
   display: grid;
-  grid-template-columns: 1fr;
+  grid-template-columns: minmax(0, 1fr);
   gap: 1.25rem;
+}
+
+.drive-column,
+.info-column {
+  min-width: 0;
 }
 
 @media (min-width: 900px) {
   .home-grid {
-    grid-template-columns: 2fr 1fr;
+    grid-template-columns: minmax(0, 2fr) minmax(0, 1fr);
     align-items: start;
   }
 
   .settings-grid {
-    grid-template-columns: 1fr 1fr;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
     align-items: start;
   }
 }
@@ -149,6 +154,7 @@ body {
 
 .drive-stats {
   display: flex;
+  flex-wrap: wrap;
   justify-content: center;
   align-items: center;
   gap: 1.5rem;
@@ -273,9 +279,14 @@ body {
   padding: 0.9rem 1.1rem;
 }
 
+.queue-item-body {
+  min-width: 0;
+}
+
 .queue-item-title {
   margin: 0;
   font-weight: 700;
+  overflow-wrap: anywhere;
 }
 
 a.queue-item-title {
@@ -292,6 +303,7 @@ a.queue-item-title:hover {
   color: var(--text-muted);
   font-size: 0.85rem;
   display: flex;
+  flex-wrap: wrap;
   gap: 1rem;
 }
 
@@ -305,6 +317,7 @@ a.queue-item-title:hover {
 
 .queue-item-error {
   color: var(--danger);
+  overflow-wrap: anywhere;
 }
 
 .queue-item-delete {
@@ -501,4 +514,28 @@ a.queue-item-title:hover {
   color: var(--text-muted);
   font-size: 0.85rem;
   margin: 0;
+}
+
+/* --- Small screens ---------------------------------------------------------- */
+
+@media (max-width: 480px) {
+  .site-header {
+    padding: 0.6rem 1rem;
+  }
+
+  .content {
+    padding: 0.9rem;
+  }
+
+  .card {
+    padding: 1rem;
+  }
+
+  .drive-title {
+    font-size: 1.5rem;
+  }
+
+  .stat-value {
+    font-size: 1.35rem;
+  }
 }
