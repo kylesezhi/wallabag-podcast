@@ -74,7 +74,7 @@
             {% endif %}
           </p>
         </div>
-        {% if ep.status in ("staged", "failed", "done") or (ep.status == "generating" and not generating) %}
+        {% if ep.status in ("staged", "failed", "done", "generating") %}
         <form method="post" action="/queue/{{ ep.id }}/delete" class="queue-item-delete" {% if ep.status == "done" %}data-confirm="true"{% endif %}>
           <button type="submit" class="btn-delete" title="Delete episode" aria-label="Delete {{ ep.title }}">Delete</button>
         </form>

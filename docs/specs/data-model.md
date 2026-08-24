@@ -51,7 +51,7 @@ staged --(generate)--> generating --(success)--> done --(delete)--> ∅
                                    \--(cancel)--> failed
 ```
 - **staged:** candidate fetched, no audio yet. Deletable via the per-item Delete button (which archives the article in Wallabag first).
-- **generating:** being synthesized; a task cancellation (Stop) marks it `failed` ("Cancelled by user"). Deletable via the Delete button only when no run is active (orphan cleanup); during an active run use the Stop button.
+- **generating:** being synthesized; a task cancellation (Stop) marks it `failed` ("Cancelled by user"). Deletable via the Delete button, which always renders; during an active run the delete route triggers Stop first (`task.cancel()`, marking the episode `failed` for removal), while an orphan (no active run) is archived in Wallabag and deleted directly.
 - **done:** has audio; appears in the RSS feed. Deletable via the per-item Delete button — this unlinks the mp3, removes the processed_articles row, and marks the Wallabag article as read. A confirm prompt guards the delete (irreversible mp3 loss + remote archive).
 - **failed:** generation error or user cancellation ("Cancelled by user"); retryable. Deletable via the Delete button.
 

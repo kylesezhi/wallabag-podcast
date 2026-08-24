@@ -34,7 +34,7 @@ A user can stop a generation run that is in progress (aborting the in-flight TTS
 
 `generating` becomes a deletable status, covering two cases:
 
-1. **Orphan (no active run):** episode stuck in `generating` after a crash/restart. `db.delete_episode` allows `'generating'`. The Delete button renders on `generating` episodes when no run is active, and the delete route archives the article in Wallabag then deletes directly.
+1. **Orphan (no active run):** episode stuck in `generating` after a crash/restart. `db.delete_episode` allows `'generating'`. The Delete button always renders on `generating` episodes; with no active run the delete route archives the article in Wallabag then deletes directly.
 2. **Active run, target is the generating episode:** the per-item delete route does NOT delete directly (the loop owns that row). Instead it triggers the same cancellation as the Stop button: `task.cancel()`. No Wallabag archive call is made (nothing was deleted). The loop marks the episode `failed`, the existing `/queue/status` polling JS reloads the page, and the user then clicks Delete on the now-`failed` row.
 
 `archived` / missing episodes remain non-deletable (unchanged ValueError behavior; no archive call); `done` episodes ARE deletable (archives in Wallabag, unlinks mp3 + removes the dedupe row).
@@ -47,7 +47,7 @@ A user can stop a generation run that is in progress (aborting the in-flight TTS
 ## UI
 
 - **Global Stop button:** rendered inside the progress card (`#generation-progress`), shown ONLY while `generating` is true. POSTs to `/queue/stop`.
-- **Per-item Delete button:** now renders for `staged`, `failed`, `done`, AND `generating` — but the `generating` case is gated on `not generating` (no active run). During an active run the generating episode shows just its status badge (use the global Stop button). Done-episode delete forms carry a `data-confirm` attribute; a small JS handler calls `confirm()` before submitting (guards irreversible mp3 loss).
+- **Per-item Delete button:** renders for `staged`, `failed`, `done`, AND `generating` — unconditionally (the earlier `not generating` gating was removed so the button is always visible; during an active run clicking it triggers the stop flow described above). Done-episode delete forms carry a `data-confirm` attribute; a small JS handler calls `confirm()` before submitting (guards irreversible mp3 loss).
 - **JS:** the existing polling logic in `static/js/app.js` is unchanged (polls `/queue/status` and reloads when `generating` flips false). A new small IIFE adds the confirm guard for `form[data-confirm="true"]`. After a stop, the cancelled episode is already `failed` in the DB by the time `generating` goes false, so the reload shows it with a Delete button.
 
 ## Docs
@@ -56,7 +56,7 @@ A user can stop a generation run that is in progress (aborting the in-flight TTS
 
 ## Acceptance criteria
 - Stop button halts an active run; the in-flight episode ends up `failed` ("Cancelled by user"); remaining staged episodes stay `staged` and can be generated later; `processed_articles` untouched for the cancelled episode.
-- Orphaned `generating` episode (no active run) shows a Delete button and is deletable.
+- Every `generating` episode (orphaned or in-flight during a run) shows a Delete button.
 - Delete-on-active-generating triggers stop (does not delete directly); after reload the episode is `failed` with a Delete button.
 - `delete_item` for `archived`/missing still raises `ValueError` (no archive call); `done` episodes are deletable (mp3 unlinked, processed_articles row removed).
 - Every real delete archives the article in Wallabag first (`PATCH archive=1`); a failed archive call leaves the episode row, mp3, and dedupe row untouched and the UI shows an error flash.

@@ -724,7 +724,7 @@ def test_stop_button_hidden_when_not_generating(client):
         app.state.generation_task = None
 
 
-def test_delete_button_hidden_for_generating_during_run(client):
+def test_delete_button_shown_for_generating_during_run(client):
     with sqlite3.connect(get_db_path()) as conn:
         _insert_generating(conn, 42, "In Flight")
         episode_id = conn.execute(
@@ -737,7 +737,9 @@ def test_delete_button_hidden_for_generating_during_run(client):
 
         assert response.status_code == 200
         assert "status-badge-generating" in response.text
-        assert f'action="/queue/{episode_id}/delete"' not in response.text
+        # The button always renders; clicking it mid-run triggers the stop
+        # flow (queue_delete cancels the task instead of deleting directly).
+        assert f'action="/queue/{episode_id}/delete"' in response.text
     finally:
         app.state.generating = False
         app.state.generation_task = None

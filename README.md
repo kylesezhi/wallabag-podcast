@@ -109,9 +109,11 @@ the UI or the database, only in `.env`.
    again (archived articles are never re-enumerated). **Clear Staged** drops
    the staged/failed items without touching completed ones.
 6. An episode can get stuck in `generating` if the process is restarted
-   mid-run. Its **Delete** button appears when no run is active, so you can
-   remove it like any other item (marking the article read in Wallabag).
-   During an active run, use **Stop Generating** instead.
+   mid-run. Its **Delete** button always appears, so you can remove it like
+   any other item (marking the article read in Wallabag). Clicking **Delete**
+   on the in-flight episode during an active run stops the run first — the
+   episode flips to `failed` and you can delete it again — or use **Stop
+   Generating** directly.
 
 ## Subscribing in a podcast app
 
