@@ -1,4 +1,5 @@
 - special pronunciation of JSON
+- exclude articles with code blocks 
 - websocket connection instead of polling
 - progress bar during generation
 - birthday shoutouts
