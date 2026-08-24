@@ -918,3 +918,62 @@ async def test_generate_all_retries_failed_after_reset(env, monkeypatch):
     assert episodes[0]["status"] == "done"
     assert episodes[0]["error"] is None
     assert processed is not None
+
+
+async def test_generate_all_skips_episode_removed_midrun(env, monkeypatch):
+    """A staged episode deleted mid-run must never be generated.
+
+    Removing a still-staged article while an earlier one synthesizes deletes
+    its DB row; when the run's snapshot reaches it, generate_all skips it:
+    no TTS call, no audio file, no processed_articles row, not counted as
+    done/failed.
+    """
+    with sqlite3.connect(get_db_path()) as conn:
+        _insert_staged(conn, [(1, "Article One"), (2, "Article Two")])
+        removed_id = conn.execute(
+            "SELECT id FROM episodes WHERE wallabag_id=2"
+        ).fetchone()[0]
+
+    def wallabag_handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/oauth/v2/token":
+            return httpx.Response(200, json=_token_response())
+        if request.url.path.startswith("/api/entries/"):
+            entry_id = int(request.url.path.split("/")[3].split(".")[0])
+            if entry_id == 1:
+                # Simulate the user removing staged episode 2 mid-run.
+                with sqlite3.connect(get_db_path()) as del_conn:
+                    del_conn.execute(
+                        "DELETE FROM episodes WHERE id=?", (removed_id,)
+                    )
+                    del_conn.commit()
+            return httpx.Response(200, json=_entry_payload(entry_id, _long_content()))
+        return httpx.Response(404)
+
+    kokoro_calls: list[httpx.Request] = []
+
+    def kokoro_handler(request: httpx.Request) -> httpx.Response:
+        kokoro_calls.append(request)
+        return httpx.Response(200, content=b"FAKE_MP3")
+
+    wallabag = _make_wallabag(wallabag_handler)
+    kokoro = _make_kokoro(kokoro_handler)
+    monkeypatch.setattr("app.pipeline.measure_duration", lambda audio_path: 60)
+
+    summary = await generate_all(wallabag, kokoro, settings=get_settings())
+
+    assert summary == {"total": 1, "done": 1, "failed": 0, "skipped": 0}
+    # Only the surviving episode was synthesized.
+    assert len(kokoro_calls) == 1
+    assert b"Article 1" in kokoro_calls[0].content
+    # The removed episode left no trace: no audio file, no row, no dedupe entry.
+    assert not (env / "audio" / f"{removed_id}.mp3").exists()
+    with sqlite3.connect(get_db_path()) as conn:
+        rows = [
+            tuple(row)
+            for row in conn.execute(
+                "SELECT wallabag_id, status FROM episodes ORDER BY wallabag_id"
+            )
+        ]
+        processed = _processed_ids(conn)
+    assert rows == [(1, "done")]
+    assert processed == [1]

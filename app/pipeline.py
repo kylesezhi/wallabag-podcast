@@ -206,7 +206,9 @@ async def generate_all(
     (``task.cancel()``) DOES abort the run: the in-flight episode is marked
     ``failed`` ("Cancelled by user"), the remaining staged episodes stay
     ``staged``, and the partial summary is returned normally (the exception is
-    not re-raised).
+    not re-raised). An episode deleted from the queue mid-run (while still
+    staged) is skipped when its turn comes: no TTS call, no audio file, no
+    processed_articles row, and it counts as neither done nor failed.
     """
     settings = settings or get_settings()
     summary = {"total": 0, "done": 0, "failed": 0, "skipped": 0}
@@ -228,6 +230,15 @@ async def generate_all(
         for ep in staged:
             episode_id = int(ep["id"])
             wallabag_id = int(ep["wallabag_id"])
+            # The staged list was snapshotted at run start: an episode removed
+            # from the queue mid-run (while still staged) must not be
+            # generated. Re-check before claiming it; there is no await
+            # between this check and set_episode_generating, so a concurrent
+            # delete cannot interleave (asyncio is single-threaded).
+            if get_episode_status(conn, episode_id) != "staged":
+                summary["total"] -= 1
+                logger.info("Episode %s removed mid-run, skipping", episode_id)
+                continue
             try:
                 set_episode_generating(conn, episode_id)
 
