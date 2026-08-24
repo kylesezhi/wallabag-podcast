@@ -1,3 +1,4 @@
 - websocket connection instead of polling
 - too wide ui on mobile 
+- the save button in settings has to go - save automatically
 - birthday shoutouts
