@@ -75,7 +75,7 @@
           </p>
         </div>
         {% if ep.status in ("staged", "failed", "done", "generating") %}
-        <form method="post" action="/queue/{{ ep.id }}/delete" class="queue-item-delete" {% if ep.status == "done" %}data-confirm="true"{% endif %}>
+        <form method="post" action="/queue/{{ ep.id }}/delete" class="queue-item-delete" data-confirm-message="{{ 'Delete this episode, remove its audio file, and mark the article as read in Wallabag?' if ep.status == 'done' else 'Delete this episode and mark the article as read in Wallabag?' }}">
           <button type="submit" class="btn-delete" title="Delete episode" aria-label="Delete {{ ep.title }}">Delete</button>
         </form>
         {% endif %}
@@ -112,5 +112,16 @@
       <p class="podcast-hint">Add this URL to your podcast app. Set <code>BASE_URL</code> to your LAN address to listen from your phone.</p>
     </div>
   </aside>
+</div>
+
+<div class="modal-overlay" id="delete-modal" hidden>
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="delete-modal-title">
+    <h3 class="modal-title" id="delete-modal-title">Are you sure?</h3>
+    <p class="modal-body" id="delete-modal-body"></p>
+    <div class="modal-actions">
+      <button type="button" class="btn btn-outline" id="delete-modal-cancel">Cancel</button>
+      <button type="button" class="btn btn-stop" id="delete-modal-confirm">Delete</button>
+    </div>
+  </div>
 </div>
 {% endblock %}

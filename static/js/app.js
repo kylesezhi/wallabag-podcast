@@ -40,19 +40,84 @@
   setInterval(poll, 2000);
 })();
 
-/* Guard done-episode deletes (irreversible mp3 loss) with a confirm(). */
+/* Guard every episode delete with a styled confirmation modal. Replaces
+ * the former native window.confirm() that only protected done episodes. */
 (function () {
   "use strict";
 
+  var overlay = document.getElementById("delete-modal");
+  if (!overlay) {
+    return;
+  }
+  var body = document.getElementById("delete-modal-body");
+  var confirmBtn = document.getElementById("delete-modal-confirm");
+  var cancelBtn = document.getElementById("delete-modal-cancel");
+  var pendingForm = null;
+  var triggerBtn = null;
+
+  function open(form, message, button) {
+    pendingForm = form;
+    triggerBtn = button || null;
+    if (body) {
+      body.textContent = message;
+    }
+    overlay.hidden = false;
+    if (cancelBtn) {
+      cancelBtn.focus();
+    }
+  }
+
+  function close() {
+    overlay.hidden = true;
+    pendingForm = null;
+    var btn = triggerBtn;
+    triggerBtn = null;
+    if (btn) {
+      try {
+        btn.focus();
+      } catch (err) {
+        /* button may be gone after a re-render */
+      }
+    }
+  }
+
+  function confirmDelete() {
+    var form = pendingForm;
+    close();
+    if (form) {
+      form.submit();
+    }
+  }
+
   document.addEventListener("submit", function (event) {
     var form = event.target;
-    if (form && form.matches && form.matches('form[data-confirm="true"]')) {
-      var msg = "Delete this episode, remove its audio file, and mark the " +
-        "article as read in Wallabag?";
-      if (!window.confirm(msg)) {
-        event.preventDefault();
-        event.stopImmediatePropagation();
-      }
+    if (!form || !form.matches || !form.matches("form[data-confirm-message]")) {
+      return;
+    }
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    var message = form.getAttribute("data-confirm-message") || "";
+    var button = event.submitter || form.querySelector("button[type=submit]");
+    open(form, message, button);
+  });
+
+  if (confirmBtn) {
+    confirmBtn.addEventListener("click", confirmDelete);
+  }
+  if (cancelBtn) {
+    cancelBtn.addEventListener("click", close);
+  }
+
+  overlay.addEventListener("click", function (event) {
+    if (event.target === overlay) {
+      close();
+    }
+  });
+
+  document.addEventListener("keydown", function (event) {
+    if (event.key === "Escape" && !overlay.hidden) {
+      event.preventDefault();
+      close();
     }
   });
 })();
