@@ -1,4 +1,3 @@
 - websocket connection instead of polling
-- Failed articles are a terminal state
 - too wide ui on mobile 
 - birthday shoutouts
