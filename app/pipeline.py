@@ -25,6 +25,8 @@ import logging
 import os
 import random
 import sqlite3
+from functools import lru_cache
+from importlib import resources
 from pathlib import Path
 
 from .config import Settings, get_settings
@@ -48,6 +50,7 @@ from .db import (
     set_episode_progress,
 )
 from .kokoro import KokoroClient, KokoroError, measure_duration
+from .kokoro import measure_duration as _measure_asset_duration
 from .textclean import SkipArticle, build_tts_input_from_article, split_tts_text
 from .wallabag import WallabagClient, WallabagError
 
@@ -214,6 +217,28 @@ async def _synthesize_with_retry(
         return await kokoro_client.synthesize(text, voice=voice)
 
 
+@lru_cache(maxsize=1)
+def _gap_silence() -> tuple[bytes, int] | None:
+    """Load the packaged end-of-episode silence asset.
+
+    Returns ``(mp3_bytes, measured_seconds)`` for ``app/assets/gap_1s.mp3`` —
+    one second of silence encoded to match Kokoro's mp3 output (24 kHz mono,
+    128 kbps) so appended playback is seamless — or None when the asset is
+    missing or unparseable, so generation proceeds without the pause instead
+    of failing. Duration is measured directly via mutagen rather than the
+    ``measure_duration`` indirection so test patches of chunk measurement
+    cannot skew the gap's contribution.
+    """
+    try:
+        data = resources.files("app").joinpath("assets/gap_1s.mp3").read_bytes()
+    except OSError:
+        return None
+    duration = _measure_asset_duration(data)
+    if duration is None:
+        return None
+    return data, duration
+
+
 async def _synthesize_chunks(
     conn: sqlite3.Connection,
     kokoro_client: KokoroClient,
@@ -221,17 +246,21 @@ async def _synthesize_chunks(
     part_path: Path,
     chunks: list[str],
     voice: str,
+    gap_seconds: float = 0.0,
 ) -> tuple[Path, int | None]:
     """Synthesize ``chunks`` sequentially, appending each MP3 to ``part_path``.
 
     Only one chunk's audio is ever held in memory: bytes are appended to the
     ``.part`` file as soon as a request returns. Chunk progress is persisted
-    before/after every synthesis so the UI can show "done/total". On success
-    the part file is atomically renamed to its final ``{id}.mp3`` path.
-    Returns ``(final_path, duration_sec)`` where the duration is the sum of
-    per-chunk mutagen measurements — None when any chunk is unparseable
-    (the caller then falls back to est_minutes). Raises on failure after any
-    number of chunks; the caller removes the stale ``.part`` file.
+    before/after every synthesis so the UI can show "done/total". After the
+    final chunk, ``floor(gap_seconds)`` copies of the packaged silent-MP3 gap
+    are appended (when > 0 and the asset loads) so episodes have an audible
+    end boundary; the gap's duration is included in the returned total.
+    On success the part file is atomically renamed to its final ``{id}.mp3``
+    path. Returns ``(final_path, duration_sec)`` where the duration is the sum
+    of per-chunk mutagen measurements plus the gap — None when any chunk is
+    unparseable (the caller then falls back to est_minutes). Raises on failure
+    after any number of chunks; the caller removes the stale ``.part`` file.
     """
     final_path = part_path.with_name(part_path.name.removesuffix(".part"))
     total: int | None = 0
@@ -247,6 +276,17 @@ async def _synthesize_chunks(
                     total += chunk_duration
             part_file.write(audio_bytes)
             set_episode_progress(conn, episode_id, index + 1, len(chunks))
+        gap = _gap_silence() if gap_seconds > 0 else None
+        if gap is not None:
+            # int() floors positive floats: whole 1-second units only. The
+            # writes contain no awaits, so a cancellation cannot interrupt
+            # mid-gap and leave a partially padded file behind the rename.
+            gap_bytes, gap_duration = gap
+            copies = int(gap_seconds)
+            for _ in range(copies):
+                part_file.write(gap_bytes)
+            if total is not None:
+                total += gap_duration * copies
     os.replace(part_path, final_path)
     return final_path, total
 
@@ -262,7 +302,8 @@ async def generate_all(
     (``Settings.KOKORO_MAX_CHUNK_CHARS``) that are synthesized sequentially and
     appended to ``{id}.mp3.part``; chunk progress (done/total) is persisted so
     the UI can poll it, and the finished part file is atomically renamed to the
-    final MP3.
+    final MP3. ``Settings.EPISODE_GAP_SECONDS`` of trailing silence is appended
+    after the last chunk so adjacent episodes have an audible boundary.
 
     Returns a summary dict ``{"total": N, "done": M, "failed": K, "skipped": L}``.
     A skipped article (cleaned text too short for TTS) counts as failed — its
@@ -317,7 +358,13 @@ async def generate_all(
                 part_path = audio_dir / f"{episode_id}.mp3.part"
                 try:
                     final_path, duration = await _synthesize_chunks(
-                        conn, kokoro_client, episode_id, part_path, chunks, voice
+                        conn,
+                        kokoro_client,
+                        episode_id,
+                        part_path,
+                        chunks,
+                        voice,
+                        gap_seconds=settings.EPISODE_GAP_SECONDS,
                     )
                 except BaseException:
                     # A failed or cancelled episode must not leave a partial

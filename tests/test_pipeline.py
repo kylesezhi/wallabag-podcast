@@ -23,6 +23,7 @@ from app.db import (
 )
 from app.kokoro import KokoroClient
 from app.pipeline import (
+    _gap_silence,
     add_random,
     clear_queue,
     delete_item,
@@ -88,6 +89,9 @@ def env(tmp_path, monkeypatch):
     for key, value in _REQUIRED_ENV.items():
         monkeypatch.setenv(key, value)
     monkeypatch.setenv("DATA_DIR", str(tmp_path))
+    # Existing tests assert exact final-file bytes and summed chunk durations;
+    # the end-of-episode silence gap is enabled explicitly in its own tests.
+    monkeypatch.setenv("EPISODE_GAP_SECONDS", "0")
     get_settings.cache_clear()
     init_db(get_db_path())
     return tmp_path
@@ -668,6 +672,52 @@ async def test_generate_cancelled_mid_chunks_cleans_up_part(env, monkeypatch):
     assert not (env / "audio" / "1.mp3.part").exists()
     assert not (env / "audio" / "1.mp3").exists()
     assert len(kokoro_calls) == 2  # the run halted after the cancel
+
+
+# ---------------------------------------------------------------------------
+# End-of-episode silence gap
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(("gap_setting", "copies"), [("0", 0), ("2", 2), ("2.9", 2)])
+async def test_generate_appends_trailing_gap(
+    env, monkeypatch, gap_setting, copies
+):
+    """floor(EPISODE_GAP_SECONDS) silence copies end each episode mp3.
+
+    The packaged silent-MP3 asset is appended after the final chunk and its
+    measured duration joins the summed chunk durations; ``0`` keeps the output
+    byte-identical to a gap-free run.
+    """
+    asset = _gap_silence()
+    assert asset is not None  # the packaged asset must load in tests too
+    gap_bytes, gap_duration = asset
+
+    monkeypatch.setenv("EPISODE_GAP_SECONDS", gap_setting)
+    get_settings.cache_clear()
+
+    with sqlite3.connect(get_db_path()) as conn:
+        _insert_staged(conn, [(1, "Article One")])
+
+    wallabag = _make_wallabag(_wallabag_ok_handler())
+    kokoro = _make_kokoro(lambda request: httpx.Response(200, content=b"FAKE_MP3"))
+    monkeypatch.setattr("app.pipeline.measure_duration", lambda audio_path: 60)
+
+    summary = await generate_all(wallabag, kokoro, settings=get_settings())
+
+    assert summary == {"total": 1, "done": 1, "failed": 0, "skipped": 0}
+
+    audio_file = env / "audio" / "1.mp3"
+    assert audio_file.read_bytes() == b"FAKE_MP3" + gap_bytes * copies
+    assert not (env / "audio" / "1.mp3.part").exists()
+
+    with sqlite3.connect(get_db_path()) as conn:
+        row = conn.execute(
+            "SELECT status, duration_sec FROM episodes WHERE id=1"
+        ).fetchone()
+    assert row[0] == "done"
+    # Patched per-chunk measurement (60) plus the real measured gap per copy.
+    assert row[1] == 60 + gap_duration * copies
 
 
 # ---------------------------------------------------------------------------

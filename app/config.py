@@ -74,6 +74,12 @@ class Settings(BaseSettings):
     EXCLUDE_TAGS: Annotated[list[str], NoDecode, BeforeValidator(_split_tags)] = []
     MIN_TEXT_CHARS: int = 200
     MAX_FETCH_PAGES: int = 50
+    # Seconds of trailing silence appended to each finished episode so
+    # back-to-back playback has an audible boundary between articles.
+    # Rendered by repeating the packaged 1-second silent MP3
+    # (app/assets/gap_1s.mp3, encoded in Kokoro's mp3 format); fractional
+    # values floor to whole seconds, 0 disables the pause.
+    EPISODE_GAP_SECONDS: float = 3.0
     FEED_TITLE: str = "Kyle's Morning Podcast"
     # NoDecode/BeforeValidator as above; the comma-separated KEY=SPOKEN pairs
     # become a dict of whole-word, case-insensitive spoken-form rewrites
