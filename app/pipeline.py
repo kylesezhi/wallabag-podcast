@@ -7,9 +7,12 @@
   a done episode also removes its audio file and processed_articles row.
 - ``stats`` summarizes the queue for the UI.
 - ``generate_all()`` produces one MP3 per staged episode: fetch the full
-  Wallabag entry, clean the HTML into TTS input, synthesize with Kokoro,
-  write the audio under ``DATA_DIR/audio/{id}.mp3``, measure its duration, and
-  mark the episode ``done`` (recording a processed_articles row). Failures are
+  Wallabag entry, clean the HTML into TTS input, split it into bounded chunks
+  (``Settings.KOKORO_MAX_CHUNK_CHARS``), synthesize each chunk with Kokoro and
+  append the bytes straight to ``DATA_DIR/audio/{id}.mp3.part`` (constant RAM;
+  chunk progress is persisted for the UI), atomically rename the finished part
+  file to ``{id}.mp3``, record the summed per-chunk duration, and mark the
+  episode ``done`` (recording a processed_articles row). Failures are
   isolated per episode: a bad article marks that episode ``failed`` and the run
   continues with the next one.
 """
@@ -17,7 +20,9 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
+import os
 import random
 import sqlite3
 from pathlib import Path
@@ -40,9 +45,10 @@ from .db import (
     set_episode_done,
     set_episode_failed,
     set_episode_generating,
+    set_episode_progress,
 )
 from .kokoro import KokoroClient, KokoroError, measure_duration
-from .textclean import SkipArticle, build_tts_input_from_article
+from .textclean import SkipArticle, build_tts_input_from_article, split_tts_text
 from .wallabag import WallabagClient, WallabagError
 
 logger = logging.getLogger(__name__)
@@ -191,12 +197,72 @@ def _resolve_voice(conn: sqlite3.Connection, settings: Settings) -> str:
     return settings.KOKORO_DEFAULT_VOICE
 
 
+async def _synthesize_with_retry(
+    kokoro_client: KokoroClient, text: str, voice: str
+) -> bytes:
+    """Synthesize one chunk, retrying once on ``KokoroError``.
+
+    Connection failures and server errors are often transient; a single retry
+    keeps one blip from failing an otherwise long synthesis. A second failure
+    propagates to the caller. ``asyncio.CancelledError`` is never caught (it is
+    a BaseException), so user stops stay immediate.
+    """
+    try:
+        return await kokoro_client.synthesize(text, voice=voice)
+    except KokoroError:
+        logger.warning("Chunk synthesis failed once; retrying")
+        return await kokoro_client.synthesize(text, voice=voice)
+
+
+async def _synthesize_chunks(
+    conn: sqlite3.Connection,
+    kokoro_client: KokoroClient,
+    episode_id: int,
+    part_path: Path,
+    chunks: list[str],
+    voice: str,
+) -> tuple[Path, int | None]:
+    """Synthesize ``chunks`` sequentially, appending each MP3 to ``part_path``.
+
+    Only one chunk's audio is ever held in memory: bytes are appended to the
+    ``.part`` file as soon as a request returns. Chunk progress is persisted
+    before/after every synthesis so the UI can show "done/total". On success
+    the part file is atomically renamed to its final ``{id}.mp3`` path.
+    Returns ``(final_path, duration_sec)`` where the duration is the sum of
+    per-chunk mutagen measurements — None when any chunk is unparseable
+    (the caller then falls back to est_minutes). Raises on failure after any
+    number of chunks; the caller removes the stale ``.part`` file.
+    """
+    final_path = part_path.with_name(part_path.name.removesuffix(".part"))
+    total: int | None = 0
+    with part_path.open("wb") as part_file:
+        set_episode_progress(conn, episode_id, 0, len(chunks))
+        for index, chunk in enumerate(chunks):
+            audio_bytes = await _synthesize_with_retry(kokoro_client, chunk, voice)
+            if total is not None:
+                chunk_duration = measure_duration(audio_bytes)
+                if chunk_duration is None:
+                    total = None
+                else:
+                    total += chunk_duration
+            part_file.write(audio_bytes)
+            set_episode_progress(conn, episode_id, index + 1, len(chunks))
+    os.replace(part_path, final_path)
+    return final_path, total
+
+
 async def generate_all(
     wallabag_client: WallabagClient,
     kokoro_client: KokoroClient,
     settings: Settings | None = None,
 ) -> dict:
     """Generate audio for all staged episodes, one at a time.
+
+    Each episode's TTS text is split into bounded chunks
+    (``Settings.KOKORO_MAX_CHUNK_CHARS``) that are synthesized sequentially and
+    appended to ``{id}.mp3.part``; chunk progress (done/total) is persisted so
+    the UI can poll it, and the finished part file is atomically renamed to the
+    final MP3.
 
     Returns a summary dict ``{"total": N, "done": M, "failed": K, "skipped": L}``.
     A skipped article (cleaned text too short for TTS) counts as failed — its
@@ -246,18 +312,26 @@ async def generate_all(
                 tts_text = build_tts_input_from_article(
                     article, min_chars=settings.MIN_TEXT_CHARS
                 )
-                audio_bytes = await kokoro_client.synthesize(tts_text, voice=voice)
+                chunks = split_tts_text(tts_text, settings.KOKORO_MAX_CHUNK_CHARS)
 
-                audio_path = audio_dir / f"{episode_id}.mp3"
-                audio_path.write_bytes(audio_bytes)
+                part_path = audio_dir / f"{episode_id}.mp3.part"
+                try:
+                    final_path, duration = await _synthesize_chunks(
+                        conn, kokoro_client, episode_id, part_path, chunks, voice
+                    )
+                except BaseException:
+                    # A failed or cancelled episode must not leave a partial
+                    # file behind; the final mp3 only appears via atomic rename.
+                    with contextlib.suppress(OSError):
+                        part_path.unlink(missing_ok=True)
+                    raise
 
-                duration = measure_duration(audio_path)
                 if duration is None:
-                    # Unreadable/corrupt audio: fall back to the estimated
+                    # Unparseable chunk audio: fall back to the estimated
                     # reading time so the episode still gets a duration.
                     duration = int(ep["est_minutes"] or 0) * 60
 
-                set_episode_done(conn, episode_id, str(audio_path), duration, drive_id)
+                set_episode_done(conn, episode_id, str(final_path), duration, drive_id)
                 add_processed_article(conn, wallabag_id, episode_id)
                 summary["done"] += 1
             except asyncio.CancelledError:

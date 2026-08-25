@@ -279,6 +279,12 @@ body {
   font-weight: 600;
 }
 
+.progress-chunk {
+  margin: 0.25rem 0 0;
+  font-size: 0.85rem;
+  color: var(--text-muted);
+}
+
 .queue-header {
   display: flex;
   align-items: center;
@@ -353,6 +359,11 @@ a.queue-item-title:hover {
 .queue-item-error {
   color: var(--danger);
   overflow-wrap: anywhere;
+}
+
+.queue-item-progress {
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
 }
 
 .queue-item-delete {

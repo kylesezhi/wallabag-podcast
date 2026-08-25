@@ -45,5 +45,5 @@ wallabag-podcast/
 - **Long-running generation** runs as a FastAPI BackgroundTask; progress + per-item status are written to SQLite and the UI polls.
 - **No mutation of Wallabag state.** All "processed" tracking is local (SQLite `processed_articles` index).
 - **Bind to 127.0.0.1 by default** (local network only; no auth on feed or UI in v1). BASE_URL is configurable so a phone on the same LAN can reach enclosure URLs.
-- **One Kokoro call per article** — Kokoro's server-side chunking/stitching handles long-form; we send the full intro+body string and stream the mp3 to disk.
+- **Chunked TTS generation** — each episode's TTS input is split client-side into sentence-boundary chunks (max `KOKORO_MAX_CHUNK_CHARS` chars); chunks are synthesized one at a time and appended straight to `data/audio/{id}.mp3.part`, so only one chunk's audio is ever in RAM and long articles cannot exhaust memory. The finished part file is atomically renamed to `{id}.mp3`; per-chunk progress is persisted for the UI.
 - **Tests:** pytest, httpx mock transports for Wallabag/Kokoro, sample Wallabag HTML fixtures for the cleaner.

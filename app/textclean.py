@@ -11,6 +11,10 @@ Kokoro TTS. No LLM, no network. The pipeline:
 5. Assemble the exact TTS input ``[pause:0.5s] {title} [pause:1s] {body}``,
    rewriting ``Settings.PRONUNCIATIONS`` whole-word matches first.
 
+``split_tts_text`` additionally splits a finished TTS input into sentence-boundary
+chunks (max ``Settings.KOKORO_MAX_CHUNK_CHARS`` chars) so the generation pipeline
+can synthesize long articles one bounded request at a time.
+
 Articles whose cleaned body is shorter than ``MIN_TEXT_CHARS`` raise
 :class:`SkipArticle` so the generation pipeline can skip them.
 """
@@ -248,6 +252,70 @@ def clean_body(html: str, min_chars: int | None = None) -> str:
             f"(minimum {threshold})"
         )
     return text
+
+
+# Sentence boundary: whitespace following terminal punctuation. Splitting here
+# keeps each TTS request on a natural spoken boundary. ``[pause:...]`` tokens
+# contain no terminal punctuation, so a boundary can never fall inside one.
+_SENTENCE_BOUNDARY_RE = re.compile(r"(?<=[.!?])\s+")
+
+
+def _split_oversized_sentence(sentence: str, max_chars: int) -> list[str]:
+    """Hard-split one over-long sentence into word-boundary parts."""
+    parts: list[str] = []
+    current = ""
+    for word in sentence.split():
+        candidate = f"{current} {word}" if current else word
+        if len(candidate) > max_chars and current:
+            parts.append(current)
+            current = word
+        else:
+            current = candidate
+    if current:
+        parts.append(current)
+    return parts
+
+
+def split_tts_text(text: str, max_chars: int | None = None) -> list[str]:
+    """Split a TTS input string into chunks of at most ``max_chars`` characters.
+
+    Chunks are assembled from whole sentences (split after terminal
+    punctuation) so every synthesized chunk ends at a natural spoken boundary.
+    A single sentence longer than ``max_chars`` is hard-split at word
+    boundaries. ``[pause:...]`` tokens are never cut in half. Joining the
+    returned chunks with single spaces reconstructs the input text exactly.
+    When ``max_chars`` is None the default ``Settings.KOKORO_MAX_CHUNK_CHARS``
+    is used.
+    """
+    limit = get_settings().KOKORO_MAX_CHUNK_CHARS if max_chars is None else max_chars
+
+    text = text.strip()
+    if not text:
+        return []
+    if len(text) <= limit:
+        return [text]
+
+    sentences = [s for s in _SENTENCE_BOUNDARY_RE.split(text) if s]
+
+    chunks: list[str] = []
+    current = ""
+    for sentence in sentences:
+        if len(sentence) > limit:
+            # Flush what we have, then hard-split the oversized sentence.
+            if current:
+                chunks.append(current)
+                current = ""
+            chunks.extend(_split_oversized_sentence(sentence, limit))
+            continue
+        candidate = f"{current} {sentence}" if current else sentence
+        if len(candidate) > limit:
+            chunks.append(current)
+            current = sentence
+        else:
+            current = candidate
+    if current:
+        chunks.append(current)
+    return chunks
 
 
 def build_tts_input(title: str, html: str, min_chars: int | None = None) -> str:

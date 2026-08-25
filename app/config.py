@@ -60,6 +60,9 @@ class Settings(BaseSettings):
     KOKORO_DEFAULT_VOICE: str = "af_heart"
     KOKORO_SPEED: float = 1.0
     KOKORO_RESPONSE_FORMAT: str = "mp3"
+    # Max characters per TTS request; long articles are split into chunks that
+    # are synthesized one at a time and appended to disk (bounded RAM).
+    KOKORO_MAX_CHUNK_CHARS: int = 2000
 
     # --- App ---
     BASE_URL: str = "http://localhost:8000"

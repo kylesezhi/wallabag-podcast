@@ -32,6 +32,8 @@ CREATE TABLE IF NOT EXISTS episodes (
     language      TEXT,
     error         TEXT,
     drive_id      INTEGER,
+    progress_done  INTEGER,
+    progress_total INTEGER,
     created_at    TEXT,
     generated_at  TEXT
 );
@@ -60,12 +62,18 @@ def get_db_path() -> Path:
 
 
 def init_db(db_path: Path | None = None) -> None:
-    """Create the schema and seed default settings rows on first run."""
+    """Create the schema, migrate existing tables, and seed default settings.
+
+    ``CREATE TABLE IF NOT EXISTS`` cannot add columns to a database created by
+    an older schema version, so missing columns are added with guarded
+    ALTER TABLE statements (idempotent on every start).
+    """
     path = Path(db_path or get_db_path())
     path.parent.mkdir(parents=True, exist_ok=True)
 
     with sqlite3.connect(path) as conn:
         conn.executescript(_SCHEMA)
+        _migrate_episodes(conn)
 
         now = _now_iso()
         settings = get_settings()
@@ -77,6 +85,14 @@ def init_db(db_path: Path | None = None) -> None:
                 "INSERT OR IGNORE INTO settings (key, value, updated_at) VALUES (?, ?, ?)",
                 (key, value, now),
             )
+
+
+def _migrate_episodes(conn: sqlite3.Connection) -> None:
+    """Add columns introduced after v1 to the episodes table when missing."""
+    existing = {row[1] for row in conn.execute("PRAGMA table_info(episodes)")}
+    for column in ("progress_done", "progress_total"):
+        if column not in existing:
+            conn.execute(f"ALTER TABLE episodes ADD COLUMN {column} INTEGER")
 
 
 def _now_iso() -> str:
@@ -147,6 +163,17 @@ def set_episode_generating(conn: sqlite3.Connection, episode_id: int) -> None:
     conn.commit()
 
 
+def set_episode_progress(
+    conn: sqlite3.Connection, episode_id: int, done: int, total: int
+) -> None:
+    """Record chunk synthesis progress (done/total) for a generating episode."""
+    conn.execute(
+        "UPDATE episodes SET progress_done=?, progress_total=? WHERE id=?",
+        (done, total, episode_id),
+    )
+    conn.commit()
+
+
 def set_episode_done(
     conn: sqlite3.Connection,
     episode_id: int,
@@ -175,10 +202,12 @@ def set_episode_failed(conn: sqlite3.Connection, episode_id: int, error: str) ->
 def reset_failed_to_staged(conn: sqlite3.Connection) -> int:
     """Re-queue all failed episodes for generation. Return rowcount.
 
-    Clears the recorded error so a retried episode starts clean.
+    Clears the recorded error and chunk progress so a retried episode
+    starts clean.
     """
     cur = conn.execute(
-        "UPDATE episodes SET status='staged', error=NULL WHERE status='failed'"
+        "UPDATE episodes SET status='staged', error=NULL, progress_done=NULL, "
+        "progress_total=NULL WHERE status='failed'"
     )
     conn.commit()
     return cur.rowcount
@@ -296,11 +325,11 @@ def get_queue_episodes(conn: sqlite3.Connection) -> list[dict]:
     """Return the visible queue (staged/generating/done/failed), oldest first.
 
     Archived episodes are hidden. Keys: id, wallabag_id, title, source, url,
-    status, est_minutes, duration_sec, error.
+    status, est_minutes, duration_sec, error, progress_done, progress_total.
     """
     rows = conn.execute(
         "SELECT id, wallabag_id, title, source, url, status, est_minutes, "
-        "duration_sec, error "
+        "duration_sec, error, progress_done, progress_total "
         "FROM episodes WHERE status IN ('staged','generating','done','failed') "
         "ORDER BY id"
     ).fetchall()
@@ -315,6 +344,8 @@ def get_queue_episodes(conn: sqlite3.Connection) -> list[dict]:
             "est_minutes": row[6],
             "duration_sec": row[7],
             "error": row[8],
+            "progress_done": row[9],
+            "progress_total": row[10],
         }
         for row in rows
     ]

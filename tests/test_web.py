@@ -927,6 +927,43 @@ def test_queue_status_with_episodes(client):
     assert len(ids) == 3
 
 
+def test_queue_status_includes_chunk_progress(client):
+    with sqlite3.connect(get_db_path()) as conn:
+        _insert_generating(conn, 1, "Article A")
+        conn.execute(
+            "UPDATE episodes SET progress_done=4, progress_total=12 WHERE id=1"
+        )
+        conn.commit()
+
+    response = client.get("/queue/status")
+
+    assert response.status_code == 200
+    episodes = {ep["id"]: ep for ep in response.json()["episodes"]}
+    assert episodes[1]["progress_done"] == 4
+    assert episodes[1]["progress_total"] == 12
+
+
+def test_home_renders_generating_row_with_progress(client):
+    app.state.generating = True
+    try:
+        with sqlite3.connect(get_db_path()) as conn:
+            _insert_generating(conn, 7, "Article G")
+            conn.execute(
+                "UPDATE episodes SET progress_done=4, progress_total=12 WHERE id=1"
+            )
+            conn.commit()
+
+        response = client.get("/")
+
+        assert response.status_code == 200
+        assert 'id="ep-progress-1"' in response.text
+        assert "4/12" in response.text
+        assert 'id="progress-chunk"' in response.text
+        assert "4/12 chunks synthesized" in response.text
+    finally:
+        app.state.generating = False
+
+
 # ---------------------------------------------------------------------------
 # Settings save + Wallabag test
 # ---------------------------------------------------------------------------

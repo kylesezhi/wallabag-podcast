@@ -29,6 +29,7 @@ from app.pipeline import (
     generate_all,
     stats,
 )
+from app.textclean import build_tts_input, split_tts_text
 from app.wallabag import WallabagClient, WallabagError
 
 _REQUIRED_ENV = {
@@ -297,7 +298,10 @@ async def test_kokoro_failure_is_isolated(env, monkeypatch):
         _insert_staged(conn, [(1, "Article One"), (2, "Article Two")])
 
     wallabag = _make_wallabag(_wallabag_ok_handler())
+    # Chunk synthesis retries once on failure, so failing an episode requires
+    # TWO consecutive error responses (initial attempt + retry).
     responses = [
+        httpx.Response(500, text="kokoro exploded"),
         httpx.Response(500, text="kokoro exploded"),
         httpx.Response(200, content=b"FAKE_MP3"),
     ]
@@ -504,6 +508,166 @@ async def test_generate_cancelled_before_first_await(env, monkeypatch):
         assert _processed_ids(conn) == []
 
     assert (env / "audio" / "1.mp3").exists() is False
+
+
+# ---------------------------------------------------------------------------
+# Chunked synthesis: streamed writes, progress, retry, cleanup
+# ---------------------------------------------------------------------------
+
+
+def _chunk_settings(monkeypatch, max_chars: int):
+    """Point generate_all at a tiny chunk limit for multi-chunk tests."""
+    monkeypatch.setenv("KOKORO_MAX_CHUNK_CHARS", str(max_chars))
+    get_settings.cache_clear()
+    return get_settings()
+
+
+async def test_generate_all_synthesizes_in_chunks(env, monkeypatch):
+    content = "<p>" + " ".join(["word"] * 100) + "</p>"
+    with sqlite3.connect(get_db_path()) as conn:
+        conn.execute(
+            "INSERT INTO episodes (wallabag_id, title, source, url, status, "
+            "est_minutes, language, created_at) VALUES "
+            "(1, 'Article One', 'example.com/1', 'https://example.com/1', "
+            "'staged', 5, 'en', '2026-01-01T00:00:00+00:00')"
+        )
+        # Give the article enough body text via the wallabag handler below.
+        conn.commit()
+
+    settings = _chunk_settings(monkeypatch, 60)
+    # _entry_payload titles entries "Article {id}"; id=1 here.
+    expected_chunks = split_tts_text(
+        build_tts_input("Article 1", content), max_chars=60
+    )
+    assert len(expected_chunks) > 1  # the test really exercises chunking
+
+    payloads = [bytes([65 + i]) * 10 for i in range(len(expected_chunks))]
+    speech_calls: list[httpx.Request] = []
+    payload_iter = iter(payloads)
+
+    def kokoro_handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/v1/audio/speech":
+            speech_calls.append(request)
+            return httpx.Response(200, content=next(payload_iter))
+        return httpx.Response(404)
+
+    wallabag = _make_wallabag(_wallabag_entry_handler(content))
+    kokoro = _make_kokoro(kokoro_handler)
+    monkeypatch.setattr("app.pipeline.measure_duration", lambda audio: 7)
+
+    summary = await generate_all(wallabag, kokoro, settings=settings)
+
+    assert summary["done"] == 1
+
+    # One request per chunk, in order, each within the char limit.
+    inputs = [json.loads(call.content)["input"] for call in speech_calls]
+    assert inputs == expected_chunks
+    assert all(len(text) <= 60 for text in inputs)
+
+    # Chunks were appended byte-by-byte to one final MP3; no .part remains.
+    audio_file = env / "audio" / "1.mp3"
+    assert audio_file.read_bytes() == b"".join(payloads)
+    assert not (env / "audio" / "1.mp3.part").exists()
+
+    with sqlite3.connect(get_db_path()) as conn:
+        row = conn.execute(
+            "SELECT status, duration_sec, progress_done, progress_total "
+            "FROM episodes WHERE id=1"
+        ).fetchone()
+    assert row[0] == "done"
+    assert row[1] == 7 * len(expected_chunks)  # summed per-chunk durations
+    assert (row[2], row[3]) == (len(expected_chunks), len(expected_chunks))
+
+
+def _wallabag_entry_handler(content: str):
+    """Wallabag handler serving one entry payload with ``content``."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/oauth/v2/token":
+            return httpx.Response(200, json=_token_response())
+        if request.url.path.startswith("/api/entries/"):
+            entry_id = int(request.url.path.split("/")[3].split(".")[0])
+            return httpx.Response(200, json=_entry_payload(entry_id, content))
+        return httpx.Response(404)
+
+    return handler
+
+
+async def test_generate_all_retries_failed_chunk_once(env, monkeypatch):
+    with sqlite3.connect(get_db_path()) as conn:
+        _insert_staged(conn, [(1, "Article One")])
+
+    responses = [
+        httpx.Response(500, text="transient boom"),  # initial attempt
+        httpx.Response(200, content=b"FAKE_MP3"),  # retry succeeds
+    ]
+    kokoro = _make_kokoro(lambda request: responses.pop(0))
+    wallabag = _make_wallabag(_wallabag_ok_handler())
+    monkeypatch.setattr("app.pipeline.measure_duration", lambda audio: 60)
+
+    summary = await generate_all(wallabag, kokoro, settings=get_settings())
+
+    assert summary == {"total": 1, "done": 1, "failed": 0, "skipped": 0}
+    assert responses == []  # both attempts were consumed
+
+
+async def test_generate_all_chunk_failure_cleans_up_part(env, monkeypatch):
+    with sqlite3.connect(get_db_path()) as conn:
+        _insert_staged(conn, [(1, "Article One")])
+
+    # Both the attempt and its retry fail -> the episode is failed.
+    kokoro = _make_kokoro(lambda request: httpx.Response(500, text="boom"))
+    wallabag = _make_wallabag(_wallabag_ok_handler())
+
+    summary = await generate_all(wallabag, kokoro, settings=get_settings())
+
+    assert summary == {"total": 1, "done": 0, "failed": 1, "skipped": 0}
+
+    with sqlite3.connect(get_db_path()) as conn:
+        episodes = _episode_rows(conn)
+        assert episodes[0]["status"] == "failed"
+        assert "500" in episodes[0]["error"]
+    assert not (env / "audio" / "1.mp3.part").exists()
+    assert not (env / "audio" / "1.mp3").exists()
+
+
+async def test_generate_cancelled_mid_chunks_cleans_up_part(env, monkeypatch):
+    content = "<p>" + " ".join(["word"] * 100) + "</p>"
+    with sqlite3.connect(get_db_path()) as conn:
+        _insert_staged(conn, [(1, "Article One"), (2, "Article Two")])
+
+    settings = _chunk_settings(monkeypatch, 60)
+
+    kokoro_calls = []
+
+    def kokoro_handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path != "/v1/audio/speech":
+            return httpx.Response(404)
+        kokoro_calls.append(request)
+        if len(kokoro_calls) == 2:
+            # First chunk succeeded; cancel lands on the second chunk's
+            # request, leaving a partial .part file behind.
+            raise asyncio.CancelledError()
+        return httpx.Response(200, content=b"CHUNK_MP3")
+
+    wallabag = _make_wallabag(_wallabag_entry_handler(content))
+    kokoro = _make_kokoro(kokoro_handler)
+    monkeypatch.setattr("app.pipeline.measure_duration", lambda audio: 60)
+
+    summary = await generate_all(wallabag, kokoro, settings=settings)
+
+    assert summary == {"total": 2, "done": 0, "failed": 1, "skipped": 0}
+
+    with sqlite3.connect(get_db_path()) as conn:
+        episodes = _episode_rows(conn)
+        assert episodes[0]["status"] == "failed"
+        assert episodes[0]["error"] == "Cancelled by user"
+        assert episodes[1]["status"] == "staged"
+
+    # The partial file was cleaned up and no final mp3 appeared.
+    assert not (env / "audio" / "1.mp3.part").exists()
+    assert not (env / "audio" / "1.mp3").exists()
+    assert len(kokoro_calls) == 2  # the run halted after the cancel
 
 
 # ---------------------------------------------------------------------------

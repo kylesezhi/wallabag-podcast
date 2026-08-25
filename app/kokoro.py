@@ -10,6 +10,7 @@ header is sent for compatibility with servers that expect one.
 
 from __future__ import annotations
 
+import io
 import logging
 from pathlib import Path
 
@@ -132,13 +133,18 @@ class KokoroClient:
         return resp.content
 
 
-def measure_duration(audio_path: Path) -> int | None:
+def measure_duration(audio: Path | bytes) -> int | None:
     """Return the audio duration in whole seconds via mutagen.
 
-    Returns None when the file can't be parsed (missing, corrupt, or not
+    Accepts raw MP3 bytes (a single synthesis chunk) or a path to an MP3 file.
+    Returns None when the audio can't be parsed (empty, corrupt, or not
     actually MP3). Never raises, so generation never crashes on bad audio.
     """
     try:
-        return int(mutagen.mp3.MP3(audio_path).info.length)
+        if isinstance(audio, bytes):
+            length = mutagen.mp3.MP3(io.BytesIO(audio)).info.length
+        else:
+            length = mutagen.mp3.MP3(audio).info.length
+        return int(length)
     except Exception:
         return None

@@ -21,6 +21,7 @@ KOKORO_BASE_URL=http://localhost:8880
 KOKORO_DEFAULT_VOICE=af_heart
 KOKORO_SPEED=1.0
 KOKORO_RESPONSE_FORMAT=mp3
+KOKORO_MAX_CHUNK_CHARS=2000      # max chars per TTS request; longer text is split into sentence-boundary chunks synthesized one at a time (bounded RAM + per-chunk progress)
 ```
 
 ### App

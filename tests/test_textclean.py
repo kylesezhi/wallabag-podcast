@@ -10,6 +10,7 @@ from app.textclean import (
     build_tts_input_from_article,
     clean_body,
     clean_title,
+    split_tts_text,
 )
 from app.wallabag import ArticleFull
 
@@ -469,3 +470,73 @@ def test_realistic_wallabag_article():
     assert "Inside the pipeline" in result
     assert "linked source" in result
     assert "memorable quote" in result
+
+
+# ---------------------------------------------------------------------------
+# 10. split_tts_text (chunking for streamed synthesis)
+# ---------------------------------------------------------------------------
+
+
+def test_split_short_text_is_single_chunk():
+    text = "One short sentence. Another one."
+    assert split_tts_text(text, max_chars=200) == [text]
+
+
+def test_split_empty_text_returns_empty_list():
+    assert split_tts_text("", max_chars=100) == []
+    assert split_tts_text("   ", max_chars=100) == []
+
+
+def test_split_groups_sentences_under_limit():
+    sentences = [f"Sentence number {i} ends here." for i in range(1, 9)]
+    text = " ".join(sentences)
+    chunks = split_tts_text(text, max_chars=60)
+    assert len(chunks) > 1
+    assert all(len(chunk) <= 60 for chunk in chunks)
+    # Joining with single spaces reconstructs the input exactly.
+    assert " ".join(chunks) == text
+    # Every chunk is made of whole sentences: it ends with terminal punctuation.
+    assert all(chunk.endswith((".", "!", "?")) for chunk in chunks)
+
+
+def test_split_hard_splits_oversized_sentence():
+    text = " ".join(["word"] * 40) + "."
+    chunks = split_tts_text(text, max_chars=50)
+    assert len(chunks) > 1
+    assert all(len(chunk) <= 50 for chunk in chunks)
+    assert " ".join(chunks) == text
+
+
+def test_split_never_cuts_pause_token():
+    # The pause token sits mid-text; a small limit forces several chunks but
+    # the token must survive intact inside exactly one chunk.
+    body = "First sentence here. " + " ".join(["filler"] * 30) + "."
+    text = f"[pause:0.5s] A Title. [pause:1s] {body}"
+    chunks = split_tts_text(text, max_chars=45)
+    joined = " ".join(chunks)
+    assert "[pause:0.5s]" in joined and "[pause:1s]" in joined
+    for chunk in chunks:
+        # No chunk may contain a partial token.
+        assert "[pause:" not in chunk.replace("[pause:0.5s]", "").replace("[pause:1s]", "")
+
+
+def test_split_mixed_sentences_and_oversized():
+    short = "Tiny sentence."
+    oversized = " ".join([f"w{i}" for i in range(30)])
+    text = f"{short} {oversized}. {short}"
+    chunks = split_tts_text(text, max_chars=40)
+    assert " ".join(chunks) == text
+    assert all(len(chunk) <= 40 for chunk in chunks)
+
+
+def test_split_uses_settings_default(monkeypatch):
+    _set_required_env(monkeypatch)
+    monkeypatch.setenv("KOKORO_MAX_CHUNK_CHARS", "30")
+    get_settings.cache_clear()
+    try:
+        text = "Aaaa bbbb cccc. Dddd eeee ffff."
+        chunks = split_tts_text(text)
+        assert all(len(chunk) <= 30 for chunk in chunks)
+        assert " ".join(chunks) == text
+    finally:
+        get_settings.cache_clear()

@@ -49,3 +49,51 @@ def test_settings_parses_exclude_tags_and_required_secrets():
         EXCLUDE_TAGS="computer, interactive, ",
     )
     assert settings.EXCLUDE_TAGS == ["computer", "interactive"]
+
+
+def test_init_db_migrates_legacy_episodes_table(tmp_path, monkeypatch):
+    """A DB created before chunk progress columns is upgraded in place."""
+    _set_required_env(monkeypatch)
+    db_path = tmp_path / "podcast.db"
+
+    # Legacy schema: episodes WITHOUT progress_done / progress_total.
+    with sqlite3.connect(db_path) as conn:
+        conn.executescript(
+            """
+            CREATE TABLE episodes (
+                id            INTEGER PRIMARY KEY AUTOINCREMENT,
+                wallabag_id   INTEGER UNIQUE,
+                title         TEXT,
+                source        TEXT,
+                url           TEXT,
+                status        TEXT,
+                audio_path    TEXT,
+                duration_sec  INTEGER,
+                est_minutes   INTEGER,
+                language      TEXT,
+                error         TEXT,
+                drive_id      INTEGER,
+                created_at    TEXT,
+                generated_at  TEXT
+            );
+            INSERT INTO episodes (wallabag_id, title, status, est_minutes)
+            VALUES (1, 'Legacy Article', 'staged', 5);
+            """
+        )
+
+    init_db(db_path)
+
+    with sqlite3.connect(db_path) as conn:
+        columns = {row[1] for row in conn.execute("PRAGMA table_info(episodes)")}
+        assert {"progress_done", "progress_total"} <= columns
+        row = conn.execute(
+            "SELECT status, progress_done, progress_total FROM episodes WHERE id=1"
+        ).fetchone()
+        assert row[0] == "staged"
+        assert row[1] is None and row[2] is None
+
+    # Re-running init stays idempotent.
+    init_db(db_path)
+    with sqlite3.connect(db_path) as conn:
+        count = conn.execute("SELECT COUNT(*) FROM episodes").fetchone()[0]
+        assert count == 1

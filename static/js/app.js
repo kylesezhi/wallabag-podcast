@@ -10,6 +10,7 @@
 
   var doneEl = document.getElementById("progress-done");
   var totalEl = document.getElementById("progress-total");
+  var chunkEl = document.getElementById("progress-chunk");
 
   async function poll() {
     try {
@@ -26,6 +27,34 @@
           totalEl.textContent = String(
             (data.stats.staged || 0) + (data.stats.generating || 0) + (data.stats.done || 0) + (data.stats.failed || 0)
           );
+        }
+      }
+      // Chunk progress of the episode currently synthesizing: update its
+      // queue-row badge and the progress-card line.
+      if (data.episodes && data.episodes.length) {
+        var genEp = null;
+        for (var i = 0; i < data.episodes.length; i++) {
+          if (data.episodes[i].status === "generating") {
+            genEp = data.episodes[i];
+            break;
+          }
+        }
+        var label = "";
+        if (genEp && genEp.progress_total) {
+          label = String(genEp.progress_done || 0) + "/" + genEp.progress_total;
+          var badge = document.getElementById("ep-progress-" + genEp.id);
+          if (badge) {
+            badge.textContent = label;
+            badge.hidden = false;
+          }
+        }
+        if (chunkEl) {
+          if (label) {
+            chunkEl.textContent = label + " chunks synthesized";
+            chunkEl.hidden = false;
+          } else {
+            chunkEl.hidden = true;
+          }
         }
       }
       if (!data.generating) {
