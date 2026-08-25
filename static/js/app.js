@@ -124,12 +124,17 @@
   var cancelBtn = document.getElementById("delete-modal-cancel");
   var pendingForm = null;
   var triggerBtn = null;
+  var DEFAULT_CONFIRM_LABEL = confirmBtn ? confirmBtn.textContent : "";
 
   function open(form, message, button) {
     pendingForm = form;
     triggerBtn = button || null;
     if (body) {
       body.textContent = message;
+    }
+    if (confirmBtn) {
+      confirmBtn.textContent =
+        (form && form.getAttribute("data-confirm-label")) || DEFAULT_CONFIRM_LABEL;
     }
     overlay.hidden = false;
     if (cancelBtn) {
@@ -140,6 +145,9 @@
   function close() {
     overlay.hidden = true;
     pendingForm = null;
+    if (confirmBtn) {
+      confirmBtn.textContent = DEFAULT_CONFIRM_LABEL;
+    }
     var btn = triggerBtn;
     triggerBtn = null;
     if (btn) {

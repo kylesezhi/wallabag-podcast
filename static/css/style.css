@@ -456,6 +456,10 @@ a.queue-item-title:hover {
   outline-offset: 1px;
 }
 
+.filter-search::-webkit-search-cancel-button {
+  cursor: pointer;
+}
+
 .filter-pills {
   display: flex;
   flex-wrap: wrap;

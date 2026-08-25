@@ -73,6 +73,19 @@ def _human_duration(minutes: int | None) -> str:
 
 templates.env.filters["human_duration"] = _human_duration
 
+
+def _static_url(path: str) -> str:
+    """Versioned /static URL (mtime query) so browsers re-fetch changed assets
+    instead of serving a heuristically-cached stale copy."""
+    try:
+        version = int((_BASE_DIR / "static" / path).stat().st_mtime)
+    except OSError:
+        version = 0
+    return f"/static/{path}?v={version}"
+
+
+templates.env.globals["static_url"] = _static_url
+
 # Allowed range for the articles_per_drive UI tunable.
 _ARTICLES_PER_DRIVE_MIN = 1
 _ARTICLES_PER_DRIVE_MAX = 50

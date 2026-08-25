@@ -884,6 +884,29 @@ def test_delete_button_shown_for_done_with_confirm(client, env):
         app.state.generation_task = None
 
 
+def test_clear_staged_form_has_confirmation(client):
+    with sqlite3.connect(get_db_path()) as conn:
+        _insert_staged(conn, [(1, "Staged Article")])
+        _insert_failed(conn, 2, "Failed Article")
+        _insert_done(conn, 3, "Done Article")
+
+    app.state.generating = False
+    app.state.generation_task = None
+    try:
+        response = client.get("/")
+
+        assert response.status_code == 200
+        # Clear Staged shares the confirmation modal; its copy spells out
+        # that failed rows go too and done rows survive.
+        assert 'action="/queue/clear" data-confirm-message' in response.text
+        assert "staged and failed episodes" in response.text
+        assert "Done episodes are kept" in response.text
+        assert 'data-confirm-label="Clear"' in response.text
+    finally:
+        app.state.generating = False
+        app.state.generation_task = None
+
+
 def test_archive_button_absent(client):
     with sqlite3.connect(get_db_path()) as conn:
         _insert_staged(conn, [(1, "Staged Article")])

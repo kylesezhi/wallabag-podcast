@@ -48,7 +48,7 @@
     <div class="queue-header">
       <h2>Queue</h2>
       <div class="queue-actions">
-        <form method="post" action="/queue/clear">
+        <form method="post" action="/queue/clear" data-confirm-message="Remove all staged and failed episodes from the queue? Done episodes are kept." data-confirm-label="Clear">
           <button type="submit" class="btn btn-outline">Clear Staged</button>
         </form>
       </div>
