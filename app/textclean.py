@@ -5,8 +5,10 @@ Kokoro TTS. No LLM, no network. The pipeline:
 
 1. Parse HTML with BeautifulSoup4 + lxml.
 2. Remove non-content elements (script/style/nav/footer/img/form/table/...).
-3. Replace section titles (h1-h6) with ``[pause:1s] Title. [pause:1s]``
-   tokens that Kokoro-FastAPI interprets natively.
+3. Replace section titles — h1-h6 headings and paragraphs whose entire text
+   is bold (``<p><strong>Title</strong></p>``) — with
+   ``[pause:1s] Title. [pause:1s]`` tokens that Kokoro-FastAPI interprets
+   natively.
 4. Extract text with a space separator, unescape residual entities, collapse
    whitespace, drop bare URLs/emails and trailing boilerplate.
 5. Ensure terminal punctuation.
@@ -26,7 +28,7 @@ from __future__ import annotations
 import html as _html
 import re
 
-from bs4 import BeautifulSoup, NavigableString
+from bs4 import BeautifulSoup, NavigableString, Tag
 
 from .config import get_settings
 from .wallabag import ArticleFull
@@ -72,6 +74,11 @@ _SPACE_BEFORE_PUNCT_RE = re.compile(r"\s+([.!?,;:])")
 _HEADING_PAUSE_BEFORE = "[pause:1s]"
 _HEADING_PAUSE_AFTER = "[pause:1s]"
 _HEADINGS = ("h1", "h2", "h3", "h4", "h5", "h6")
+
+# Wallabag reader output also marks section titles as paragraphs whose entire
+# text is bold (<p><strong>Title</strong></p>, <b> variant included). Those
+# pseudo-headings get the same treatment as real heading tags.
+_BOLD_PARAGRAPH_TAGS = ("strong", "b")
 
 # Bare URLs in text: http/https schemes and bare "www." links. The match is
 # greedy and trailing sentence punctuation (". , ! ? ...") is trimmed so a URL
@@ -130,22 +137,48 @@ def _normalize_ws(text: str) -> str:
     return _SPACE_BEFORE_PUNCT_RE.sub(r"\1", text)
 
 
-def _wrap_headings_with_pauses(soup: BeautifulSoup) -> None:
-    """Replace each heading with a pause-wrapped, period-terminated string.
+def _all_text_is_bold(node: Tag) -> bool:
+    """True when every non-whitespace string descends from <strong>/<b>.
 
-    Empty/whitespace-only headings are skipped; nested inline markup inside a
-    heading (<h2><em>Title</em></h2>) is flattened by get_text. Consecutive
-    headings produce adjacent pause pairs — Kokoro handles repeated tokens.
+    Partially-bold paragraphs ("<b>Lead</b> rest of sentence") return False,
+    keeping ordinary emphasized prose out of the section-title path.
+    """
+    for part in node.descendants:
+        if isinstance(part, NavigableString) and part.strip():
+            if not any(a.name in _BOLD_PARAGRAPH_TAGS for a in part.parents):
+                return False
+    return True
+
+
+def _section_title_token(text: str) -> str:
+    """Pause-wrapped, period-terminated TTS fragment for one section title."""
+    return (
+        f"{_HEADING_PAUSE_BEFORE} "
+        f"{_ensure_terminal_punctuation(text)} {_HEADING_PAUSE_AFTER}"
+    )
+
+
+def _wrap_section_titles_with_pauses(soup: BeautifulSoup) -> None:
+    """Replace each section title with a pause-wrapped, period-terminated string.
+
+    Section titles are h1-h6 headings plus paragraphs whose entire text is
+    bold (<p><strong>Title</strong></p>). Empty/whitespace-only titles are
+    skipped; nested inline markup inside a title (<h2><em>Title</em></h2>)
+    is flattened by get_text. Consecutive titles produce adjacent pause
+    pairs — Kokoro handles repeated tokens.
     """
     for node in soup.find_all(_HEADINGS):
         text = node.get_text(" ", strip=True)
         if not text:
             continue
-        token = (
-            f"{_HEADING_PAUSE_BEFORE} "
-            f"{_ensure_terminal_punctuation(text)} {_HEADING_PAUSE_AFTER}"
-        )
-        node.replace_with(NavigableString(token))
+        node.replace_with(NavigableString(_section_title_token(text)))
+    for node in soup.find_all("p"):
+        if not _all_text_is_bold(node):
+            continue
+        text = node.get_text(" ", strip=True)
+        if not text:
+            continue
+        node.replace_with(NavigableString(_section_title_token(text)))
 
 
 def _extract_text(html: str) -> str:
@@ -154,7 +187,7 @@ def _extract_text(html: str) -> str:
     for tag in _REMOVE_TAGS:
         for node in soup.find_all(tag):
             node.decompose()
-    _wrap_headings_with_pauses(soup)
+    _wrap_section_titles_with_pauses(soup)
     return soup.get_text(separator=" ")
 
 

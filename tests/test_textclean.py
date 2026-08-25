@@ -500,6 +500,57 @@ def test_build_tts_input_from_article_wraps_section_titles():
     assert "[pause:1s] Advanced Usage. [pause:1s]" in result
 
 
+def test_bold_paragraph_wrapped_in_pause_tokens():
+    result = clean_body(
+        "<p><strong>Section Title</strong></p><p>Body text follows here.</p>",
+        min_chars=0,
+    )
+    assert "[pause:1s] Section Title. [pause:1s]" in result
+
+
+def test_bold_b_paragraph_wrapped_in_pause_tokens():
+    result = clean_body(
+        "<p><b>B Title</b></p><p>Body text follows here.</p>", min_chars=0
+    )
+    assert "[pause:1s] B Title. [pause:1s]" in result
+
+
+def test_nested_markup_in_bold_paragraph_flattened():
+    result = clean_body(
+        "<p><strong>The <em>Rust</em> Story</strong></p>"
+        "<p>Body continues here.</p>",
+        min_chars=0,
+    )
+    assert "[pause:1s] The Rust Story. [pause:1s]" in result
+
+
+def test_partially_bold_paragraph_stays_prose():
+    result = clean_body(
+        "<p><strong>Lead words</strong> remain ordinary prose here.</p>",
+        min_chars=0,
+    )
+    assert "[pause:" not in result
+
+
+def test_whitespace_only_bold_paragraph_skipped():
+    result = clean_body(
+        "<p><strong>   </strong></p><p>Solo body text remains.</p>", min_chars=0
+    )
+    assert "[pause:" not in result
+
+
+def test_heading_and_bold_paragraph_end_to_end():
+    article = _article(
+        "<h2>Getting Started</h2>"
+        "<p><strong>Installation</strong></p>"
+        "<p>First section body text goes here.</p>",
+        title="My Article",
+    )
+    result = build_tts_input_from_article(article, min_chars=0)
+    assert "[pause:1s] Getting Started. [pause:1s]" in result
+    assert "[pause:1s] Installation. [pause:1s]" in result
+
+
 # ---------------------------------------------------------------------------
 # realistic Wallabag-style article
 # ---------------------------------------------------------------------------
