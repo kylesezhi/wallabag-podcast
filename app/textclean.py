@@ -5,10 +5,12 @@ Kokoro TTS. No LLM, no network. The pipeline:
 
 1. Parse HTML with BeautifulSoup4 + lxml.
 2. Remove non-content elements (script/style/nav/footer/img/form/table/...).
-3. Extract text with a space separator, unescape residual entities, collapse
+3. Replace section titles (h1-h6) with ``[pause:1s] Title. [pause:1s]``
+   tokens that Kokoro-FastAPI interprets natively.
+4. Extract text with a space separator, unescape residual entities, collapse
    whitespace, drop bare URLs/emails and trailing boilerplate.
-4. Ensure terminal punctuation.
-5. Assemble the exact TTS input ``[pause:0.5s] {title} [pause:1s] {body}``,
+5. Ensure terminal punctuation.
+6. Assemble the exact TTS input ``[pause:0.5s] {title} [pause:1s] {body}``,
    rewriting ``Settings.PRONUNCIATIONS`` whole-word matches first.
 
 ``split_tts_text`` additionally splits a finished TTS input into sentence-boundary
@@ -24,7 +26,7 @@ from __future__ import annotations
 import html as _html
 import re
 
-from bs4 import BeautifulSoup
+from bs4 import BeautifulSoup, NavigableString
 
 from .config import get_settings
 from .wallabag import ArticleFull
@@ -62,6 +64,14 @@ _WS_RE = re.compile(r"\s+")
 # A space immediately before punctuation ("friends .") is an artifact of the
 # get_text(separator=" ") join; drop it so text reads naturally.
 _SPACE_BEFORE_PUNCT_RE = re.compile(r"\s+([.!?,;:])")
+
+# Section titles: heading elements wrapped in pause tokens before flattening.
+# Kokoro-FastAPI interprets ``[pause:Xs]`` markers natively — the same tokens
+# already frame the article title in build_tts_input. Fixed durations, same
+# style as those hardcoded title/body pauses.
+_HEADING_PAUSE_BEFORE = "[pause:1s]"
+_HEADING_PAUSE_AFTER = "[pause:1s]"
+_HEADINGS = ("h1", "h2", "h3", "h4", "h5", "h6")
 
 # Bare URLs in text: http/https schemes and bare "www." links. The match is
 # greedy and trailing sentence punctuation (". , ! ? ...") is trimmed so a URL
@@ -120,12 +130,31 @@ def _normalize_ws(text: str) -> str:
     return _SPACE_BEFORE_PUNCT_RE.sub(r"\1", text)
 
 
+def _wrap_headings_with_pauses(soup: BeautifulSoup) -> None:
+    """Replace each heading with a pause-wrapped, period-terminated string.
+
+    Empty/whitespace-only headings are skipped; nested inline markup inside a
+    heading (<h2><em>Title</em></h2>) is flattened by get_text. Consecutive
+    headings produce adjacent pause pairs — Kokoro handles repeated tokens.
+    """
+    for node in soup.find_all(_HEADINGS):
+        text = node.get_text(" ", strip=True)
+        if not text:
+            continue
+        token = (
+            f"{_HEADING_PAUSE_BEFORE} "
+            f"{_ensure_terminal_punctuation(text)} {_HEADING_PAUSE_AFTER}"
+        )
+        node.replace_with(NavigableString(token))
+
+
 def _extract_text(html: str) -> str:
     """Parse HTML, drop non-content elements, and return plain text."""
     soup = BeautifulSoup(html, "lxml")
     for tag in _REMOVE_TAGS:
         for node in soup.find_all(tag):
             node.decompose()
+    _wrap_headings_with_pauses(soup)
     return soup.get_text(separator=" ")
 
 

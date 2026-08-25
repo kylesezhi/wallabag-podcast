@@ -436,6 +436,71 @@ def test_apply_pronunciations_multiple_keys_single_pass():
 
 
 # ---------------------------------------------------------------------------
+# 9b. heading pause tokens (section titles)
+# ---------------------------------------------------------------------------
+
+
+def test_heading_wrapped_in_pause_tokens_with_period():
+    result = clean_body(
+        "<h2>Chapter Two</h2><p>Body text follows here.</p>", min_chars=0
+    )
+    assert "[pause:1s] Chapter Two. [pause:1s]" in result
+
+
+def test_heading_keeps_existing_terminal_punctuation():
+    result = clean_body("<h2>Is Rust Safe?</h2><p>Body text follows.</p>", min_chars=0)
+    assert "[pause:1s] Is Rust Safe? [pause:1s]" in result
+
+
+def test_empty_heading_skipped():
+    result = clean_body("<h2></h2><h3>   </h3><p>Solo body text remains.</p>", min_chars=0)
+    assert "[pause:" not in result
+    assert result == "Solo body text remains."
+
+
+def test_nested_markup_in_heading_flattened():
+    result = clean_body(
+        "<h2>The <em>Rust</em> Story</h2><p>Body continues here.</p>", min_chars=0
+    )
+    assert "[pause:1s] The Rust Story. [pause:1s]" in result
+
+
+def test_consecutive_headings_both_wrapped():
+    html = "<h2>Part One</h2><h3>Details</h3><p>Body text lives here.</p>"
+    result = clean_body(html, min_chars=0)
+    assert "[pause:1s] Part One. [pause:1s]" in result
+    assert "[pause:1s] Details. [pause:1s]" in result
+
+
+def test_headings_inside_removed_containers_produce_no_tokens():
+    # nav/footer/aside are decomposed entirely, so their headings never
+    # reach the pause-wrapping step.
+    lead = "<p>" + "Real article prose that must survive cleaning. " * 30 + "</p>"
+    html = f"""
+    {lead}
+    <footer>
+      <h4>Related articles</h4>
+      <p>More junk links</p>
+    </footer>
+    """
+    result = clean_body(html, min_chars=0)
+    assert "[pause:" not in result
+    assert "Related articles" not in result
+
+
+def test_build_tts_input_from_article_wraps_section_titles():
+    article = _article(
+        "<h2>Getting Started</h2><p>First section body text.</p>"
+        "<h2>Advanced Usage</h2><p>Second section body text.</p>",
+        title="My Article",
+    )
+    result = build_tts_input_from_article(article, min_chars=0)
+    assert result.startswith("[pause:0.5s] My Article [pause:1s]")
+    assert "[pause:1s] Getting Started. [pause:1s]" in result
+    assert "[pause:1s] Advanced Usage. [pause:1s]" in result
+
+
+# ---------------------------------------------------------------------------
 # realistic Wallabag-style article
 # ---------------------------------------------------------------------------
 
@@ -468,6 +533,7 @@ def test_realistic_wallabag_article():
     assert "Related articles" not in result
     assert "Unrelated story" not in result
     assert "Inside the pipeline" in result
+    assert "[pause:1s] Inside the pipeline. [pause:1s]" in result
     assert "linked source" in result
     assert "memorable quote" in result
 

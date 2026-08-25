@@ -1,5 +1,4 @@
 - reduce verbose comments
-- highlight titles somehow - maybe need an llm for this <http://192.168.42.223:8000/view/1561>
 - exclude articles with code blocks 
 - websocket connection instead of polling
 - progress bar during generation
