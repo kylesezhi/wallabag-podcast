@@ -39,12 +39,6 @@
         <span id="progress-done">{{ stats.done + stats.generating }}</span> of
         <span id="progress-total">{{ stats.staged + stats.generating + stats.done + stats.failed }}</span>
       </p>
-      {% set current_gen = episodes | selectattr("status", "equalto", "generating") | first %}
-      <p class="progress-chunk" id="progress-chunk"{% if not current_gen or not current_gen.progress_total %} hidden{% endif %}>
-        {%- if current_gen and current_gen.progress_total -%}
-        {{ current_gen.progress_done }} of {{ current_gen.progress_total }} chunks synthesized
-        {%- endif -%}
-      </p>
       <form method="post" action="/queue/stop">
         <button type="submit" class="btn btn-block btn-stop">Stop Generating</button>
       </form>
@@ -80,7 +74,7 @@
           <p class="queue-item-status">
             <span class="status-badge status-badge-{{ ep.status }}">{{ ep.status }}</span>
             {% if ep.status == "generating" %}
-            <span class="queue-item-progress" id="ep-progress-{{ ep.id }}"{% if not ep.progress_total %} hidden{% endif %}>{% if ep.progress_total %}{{ ep.progress_done }} of {{ ep.progress_total }} chunks synthesized{% endif %}</span>
+            <span class="queue-item-progress" id="ep-progress-{{ ep.id }}" role="progressbar" aria-label="Chunks synthesized"{% if ep.progress_total %} aria-valuemax="{{ ep.progress_total }}" aria-valuenow="{{ ep.progress_done or 0 }}" title="{{ ep.progress_done or 0 }} of {{ ep.progress_total }} chunks synthesized"{% else %} hidden{% endif %}>{% if ep.progress_total %}<span class="queue-item-progress-fill" style="width: {{ ((ep.progress_done or 0) / ep.progress_total * 100) | round(1) }}%"></span>{% endif %}</span>
             {% endif %}
             {% if ep.status == "failed" and ep.error %}
             <span class="queue-item-error">{{ ep.error }}</span>

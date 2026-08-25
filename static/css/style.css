@@ -279,12 +279,6 @@ body {
   font-weight: 600;
 }
 
-.progress-chunk {
-  margin: 0.25rem 0 0;
-  font-size: 0.85rem;
-  color: var(--text-muted);
-}
-
 .queue-header {
   display: flex;
   align-items: center;
@@ -362,8 +356,25 @@ a.queue-item-title:hover {
 }
 
 .queue-item-progress {
-  color: var(--text-muted);
-  font-variant-numeric: tabular-nums;
+  display: inline-block;
+  width: 7rem;
+  height: 0.5rem;
+  border-radius: 999px;
+  background: var(--cream-dark);
+  overflow: hidden;
+}
+
+.queue-item-progress[hidden] {
+  display: none;
+}
+
+.queue-item-progress-fill {
+  display: block;
+  width: 0;
+  height: 100%;
+  border-radius: 999px;
+  background: var(--green);
+  transition: width 0.4s ease;
 }
 
 .queue-item-delete {
