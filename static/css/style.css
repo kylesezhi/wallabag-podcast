@@ -314,6 +314,10 @@ body {
   padding: 0.9rem 1.1rem;
 }
 
+.queue-item[hidden] {
+  display: none;
+}
+
 .queue-item-body {
   min-width: 0;
 }
@@ -425,6 +429,99 @@ a.queue-item-title:hover {
 .status-badge-failed {
   background: #f6ddd6;
   color: var(--danger);
+}
+
+/* --- Queue filters ---------------------------------------------------------------- */
+
+.queue-filter {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+  margin: 0.6rem 0 0.9rem;
+}
+
+.filter-search {
+  flex: 1 1 12rem;
+  min-width: 10rem;
+  padding: 0.45rem 0.85rem;
+  border: 1px solid var(--cream-dark);
+  border-radius: 999px;
+  background: #fff;
+  font-size: 0.9rem;
+}
+
+.filter-search:focus-visible {
+  outline: 2px solid var(--tan);
+  outline-offset: 1px;
+}
+
+.filter-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+.filter-pill {
+  padding: 0.2rem 0.7rem;
+  border: 1.5px solid transparent;
+  border-radius: 999px;
+  background: transparent;
+  font-size: 0.72rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  cursor: pointer;
+}
+
+.filter-pill:hover {
+  opacity: 0.75;
+}
+
+.filter-pill:focus-visible {
+  outline: 2px solid var(--tan);
+  outline-offset: 1px;
+}
+
+.filter-pill[data-status="staged"] {
+  border-color: var(--text-muted);
+  color: var(--text-muted);
+}
+
+.filter-pill[data-status="staged"].active {
+  background: var(--cream-dark);
+}
+
+.filter-pill[data-status="generating"] {
+  border-color: #7a5b12;
+  color: #7a5b12;
+}
+
+.filter-pill[data-status="generating"].active {
+  background: #f0e2b8;
+}
+
+.filter-pill[data-status="done"] {
+  border-color: var(--green-dark);
+  color: var(--green-dark);
+}
+
+.filter-pill[data-status="done"].active {
+  background: #d9e8cf;
+}
+
+.filter-pill[data-status="failed"] {
+  border-color: var(--danger);
+  color: var(--danger);
+}
+
+.filter-pill[data-status="failed"].active {
+  background: #f6ddd6;
+}
+
+.queue-no-match {
+  margin: 0.5rem 0 0;
+  color: var(--text-muted);
 }
 
 .queue-empty {

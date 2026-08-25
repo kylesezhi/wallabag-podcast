@@ -64,6 +64,52 @@
   setInterval(poll, 2000);
 })();
 
+/* Live queue filtering: title search + status pills hide/show rows entirely
+ * client-side. Hidden rows still update via the polling above (by id). */
+(function () {
+  "use strict";
+
+  var search = document.getElementById("queue-title-filter");
+  var pills = document.querySelectorAll(".filter-pill");
+  var rows = document.querySelectorAll(".queue-list .queue-item");
+  var noMatch = document.getElementById("queue-no-match");
+  if (!search || !rows.length || !noMatch) {
+    return;
+  }
+
+  function apply() {
+    var query = search.value.trim().toLowerCase();
+    var active = {};
+    for (var i = 0; i < pills.length; i++) {
+      if (pills[i].classList.contains("active")) {
+        active[pills[i].dataset.status] = true;
+      }
+    }
+    var visible = 0;
+    for (var j = 0; j < rows.length; j++) {
+      var row = rows[j];
+      var title = row.querySelector(".queue-item-title");
+      var text = title ? title.textContent.toLowerCase() : "";
+      var show = (!query || text.indexOf(query) !== -1) && active[row.dataset.status];
+      row.hidden = !show;
+      if (show) {
+        visible++;
+      }
+    }
+    noMatch.hidden = visible > 0;
+  }
+
+  search.addEventListener("input", apply);
+
+  for (var k = 0; k < pills.length; k++) {
+    pills[k].addEventListener("click", function () {
+      this.classList.toggle("active");
+      this.setAttribute("aria-pressed", this.classList.contains("active") ? "true" : "false");
+      apply();
+    });
+  }
+})();
+
 /* Guard every episode delete with a styled confirmation modal. Replaces
  * the former native window.confirm() that only protected done episodes. */
 (function () {

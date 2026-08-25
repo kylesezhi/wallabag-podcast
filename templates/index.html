@@ -55,9 +55,18 @@
     </div>
 
     {% if episodes %}
+    <div class="queue-filter">
+      <input type="search" id="queue-title-filter" class="filter-search" placeholder="Filter by title&hellip;" aria-label="Filter episodes by title" autocomplete="off">
+      <div class="filter-pills" role="group" aria-label="Filter episodes by status">
+        <button type="button" class="filter-pill active" data-status="staged" aria-pressed="true">Staged</button>
+        <button type="button" class="filter-pill active" data-status="generating" aria-pressed="true">Generating</button>
+        <button type="button" class="filter-pill active" data-status="done" aria-pressed="true">Done</button>
+        <button type="button" class="filter-pill active" data-status="failed" aria-pressed="true">Failed</button>
+      </div>
+    </div>
     <ul class="queue-list">
       {% for ep in episodes %}
-      <li class="card queue-item status-{{ ep.status }}">
+      <li class="card queue-item status-{{ ep.status }}" data-status="{{ ep.status }}">
         <div class="queue-item-body">
           <a class="queue-item-title" href="{{ wallabag_url.rstrip('/') }}/view/{{ ep.wallabag_id }}" target="_blank" rel="noopener noreferrer">{{ ep.title }}</a>
           <p class="queue-item-meta">
@@ -89,6 +98,7 @@
       </li>
       {% endfor %}
     </ul>
+    <p class="queue-no-match" id="queue-no-match" hidden>No episodes match your filters.</p>
     {% else %}
     <div class="card queue-empty">
       <p>No articles in the queue yet — it's empty. Use <strong>Add {{ articles_per_drive }} Random Articles</strong> to stage a few articles.</p>
