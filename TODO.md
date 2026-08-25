@@ -1,4 +1,5 @@
 - reduce verbose comments
+- highlight titles somehow - maybe need an llm for this
 - exclude articles with code blocks 
 - websocket connection instead of polling
 - progress bar during generation
