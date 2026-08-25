@@ -41,7 +41,7 @@
         }
         var label = "";
         if (genEp && genEp.progress_total) {
-          label = String(genEp.progress_done || 0) + "/" + genEp.progress_total;
+          label = String(genEp.progress_done || 0) + " of " + genEp.progress_total + " chunks synthesized";
           var badge = document.getElementById("ep-progress-" + genEp.id);
           if (badge) {
             badge.textContent = label;

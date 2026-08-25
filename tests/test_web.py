@@ -957,9 +957,8 @@ def test_home_renders_generating_row_with_progress(client):
 
         assert response.status_code == 200
         assert 'id="ep-progress-1"' in response.text
-        assert "4/12" in response.text
+        assert "4 of 12 chunks synthesized" in response.text
         assert 'id="progress-chunk"' in response.text
-        assert "4/12 chunks synthesized" in response.text
     finally:
         app.state.generating = False
 
