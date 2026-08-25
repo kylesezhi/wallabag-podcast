@@ -1,3 +1,4 @@
+- reduce verbose comments
 - exclude articles with code blocks 
 - websocket connection instead of polling
 - progress bar during generation
