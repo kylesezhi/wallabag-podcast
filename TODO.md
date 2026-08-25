@@ -1,5 +1,5 @@
+- add live filters for type and search to episodes list
 - reduce verbose comments
 - exclude articles with code blocks 
 - websocket connection instead of polling
-- progress bar during generation
 - birthday shoutouts
