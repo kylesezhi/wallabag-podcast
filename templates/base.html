@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>{% block title %}Kyle's Morning Podcast{% endblock %}</title>
+  <title>{% block title %}{{ feed_title }}{% endblock %}</title>
   <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>☕</text></svg>">
   <link rel="stylesheet" href="{{ static_url('css/style.css') }}">
 </head>
@@ -11,7 +11,7 @@
   <header class="site-header">
     <a class="brand" href="/">
       <span class="brand-logo" aria-hidden="true">&#9749;</span>
-      <span class="brand-name">Kyle's Morning Podcast</span>
+      <span class="brand-name">{{ feed_title }}</span>
     </a>
     <nav class="site-nav">
       <a class="nav-gear" href="/settings" title="Settings" aria-label="Settings">&#9881;</a>
