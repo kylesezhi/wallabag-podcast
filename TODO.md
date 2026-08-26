@@ -1,3 +1,4 @@
+- instead of linking to Walla bag link to an internal page for a given article that has links to Archive it in Walla bag and also delete it from the podcast 
 - add live filters for type and search to episodes list
 - reduce verbose comments
 - exclude articles with code blocks 
