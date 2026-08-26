@@ -36,6 +36,7 @@ from .db import (
     delete_episode,
     delete_processed_article,
     delete_staged_failed_episodes,
+    get_episode_progress,
     get_episode_status,
     get_episode_wallabag_id,
     get_processed_wallabag_ids,
@@ -200,6 +201,21 @@ def _resolve_voice(conn: sqlite3.Connection, settings: Settings) -> str:
     return settings.KOKORO_DEFAULT_VOICE
 
 
+def _progress_suffix(conn: sqlite3.Connection, episode_id: int) -> str:
+    """Annotate a failure log with the chunk the run reached.
+
+    Reads the persisted ``progress_done``/``progress_total`` row and renders
+    ``" at chunk {done+1}/{total}"`` — the 1-based index of the chunk being
+    attempted when the failure occurred (done counts completed chunks). Returns
+    an empty string when no progress was recorded (the failure predated chunk
+    synthesis, e.g. a Wallabag fetch error).
+    """
+    done, total = get_episode_progress(conn, episode_id)
+    if total:
+        return f" at chunk {(done or 0) + 1}/{total}"
+    return ""
+
+
 async def _synthesize_with_retry(
     kokoro_client: KokoroClient, text: str, voice: str
 ) -> bytes:
@@ -313,9 +329,13 @@ async def generate_all(
     (``task.cancel()``) DOES abort the run: the in-flight episode is marked
     ``failed`` ("Cancelled by user"), the remaining staged episodes stay
     ``staged``, and the partial summary is returned normally (the exception is
-    not re-raised). An episode deleted from the queue mid-run (while still
-    staged) is skipped when its turn comes: no TTS call, no audio file, no
-    processed_articles row, and it counts as neither done nor failed.
+    not re-raised). Failures record a short reason in ``episodes.error``
+    (Kokoro/Wallabag → ``str(exc)``; unexpected →
+    ``"Unexpected: <ExcType>: <msg>"``) while the full traceback goes to the
+    log file; the chunk position reached is annotated in the failure log.
+    An episode deleted from the queue mid-run (while still staged) is skipped
+    when its turn comes: no TTS call, no audio file, no processed_articles
+    row, and it counts as neither done nor failed.
     """
     settings = settings or get_settings()
     summary = {"total": 0, "done": 0, "failed": 0, "skipped": 0}
@@ -324,6 +344,7 @@ async def generate_all(
     try:
         staged = get_staged_episodes(conn)
         summary["total"] = len(staged)
+        logger.info("Generation run started: %s staged episodes", summary["total"])
         if not staged:
             return summary
 
@@ -354,6 +375,12 @@ async def generate_all(
                     article, min_chars=settings.MIN_TEXT_CHARS
                 )
                 chunks = split_tts_text(tts_text, settings.KOKORO_MAX_CHUNK_CHARS)
+                logger.info(
+                    "Generating episode %s (wallabag=%s, %d chunks)",
+                    episode_id,
+                    wallabag_id,
+                    len(chunks),
+                )
 
                 part_path = audio_dir / f"{episode_id}.mp3.part"
                 try:
@@ -380,6 +407,12 @@ async def generate_all(
 
                 set_episode_done(conn, episode_id, str(final_path), duration, drive_id)
                 add_processed_article(conn, wallabag_id, episode_id)
+                logger.info(
+                    "Episode %s done: %ds audio, %d chunks",
+                    episode_id,
+                    duration,
+                    len(chunks),
+                )
                 summary["done"] += 1
             except asyncio.CancelledError:
                 # The run was cancelled via task.cancel(): CancelledError is a
@@ -390,24 +423,49 @@ async def generate_all(
                 # caller awaits this task and expects the partial summary, and
                 # _run_generation's finally flips the generating flag.
                 summary["failed"] += 1
-                logger.warning("Episode %s cancelled by user", episode_id)
+                logger.warning(
+                    "Episode %s cancelled by user%s",
+                    episode_id,
+                    _progress_suffix(conn, episode_id),
+                )
                 set_episode_failed(conn, episode_id, "Cancelled by user")
                 break
             except SkipArticle as exc:
                 summary["skipped"] += 1
                 summary["failed"] += 1
-                logger.warning("Skipping episode %s: %s", episode_id, exc)
+                logger.warning(
+                    "Skipping episode %s: %s%s",
+                    episode_id,
+                    exc,
+                    _progress_suffix(conn, episode_id),
+                )
                 set_episode_failed(conn, episode_id, f"Skipped: {exc}")
             except (KokoroError, WallabagError) as exc:
+                # Expected, user-facing failure: store the short message in the
+                # DB (shown in the queue UI) but log the full cause chain to the
+                # log file so failures are diagnosable.
                 summary["failed"] += 1
-                logger.warning("Episode %s failed: %s", episode_id, exc)
+                logger.error(
+                    "Episode %s failed: %s%s",
+                    episode_id,
+                    exc,
+                    _progress_suffix(conn, episode_id),
+                    exc_info=True,
+                )
                 set_episode_failed(conn, episode_id, str(exc))
-            except Exception:
-                # Unexpected per-episode failure (disk, parsing, ...): record it
-                # and keep going so one bad episode never stops the run.
-                logger.exception("Unexpected error generating episode %s", episode_id)
+            except Exception as exc:
+                # Unexpected per-episode failure (disk, parsing, ...): record
+                # it and keep going so one bad episode never stops the run. The
+                # short reason (exception type + message) goes in the DB for
+                # the UI; the full traceback goes to the log file only.
+                logger.exception(
+                    "Unexpected error generating episode %s%s",
+                    episode_id,
+                    _progress_suffix(conn, episode_id),
+                )
                 summary["failed"] += 1
-                set_episode_failed(conn, episode_id, "Unexpected error")
+                error = f"Unexpected: {type(exc).__name__}: {exc}"[:200]
+                set_episode_failed(conn, episode_id, error)
     finally:
         conn.close()
 

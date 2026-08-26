@@ -35,6 +35,7 @@ MIN_TEXT_CHARS=200                 # skip articles whose cleaned text is shorter
 MAX_FETCH_PAGES=50                # safety cap when enumerating unread candidates
 EPISODE_GAP_SECONDS=3             # seconds of trailing silence appended to each episode's mp3 (floored to whole 1-second units of the packaged silent asset; 0 disables)
 FEED_TITLE=My Wallabag Podcast
+LOG_LEVEL=INFO                     # DEBUG/INFO/WARNING/ERROR; controls app + uvicorn loggers; a rotating log file is written to DATA_DIR/logs/wallabag-podcast.log (5MB x3 backups)
 PRONUNCIATIONS=JSON=Jason,SQL=sequel  # comma-separated KEY=SPOKEN pairs; whole-word, case-insensitive rewrites before TTS (empty by default)
 ```
 

@@ -37,6 +37,7 @@ from .db import (
     set_setting,
 )
 from .kokoro import KokoroClient
+from .logging_setup import configure_logging
 from .pipeline import (
     add_random,
     clear_queue,
@@ -102,6 +103,12 @@ async def lifespan(app: FastAPI):
     (settings.DATA_DIR / "audio").mkdir(parents=True, exist_ok=True)
 
     init_db(get_db_path())
+
+    # Configure logging AFTER DATA_DIR exists and BEFORE yielding so every
+    # request and the generation pipeline write to the rotating log file
+    # under DATA_DIR/logs/. (uvicorn's own loggers were already configured
+    # during server startup; configure_logging preserves them.)
+    configure_logging(settings)
 
     # Shared clients, stored on app.state so tests can replace them with mocks.
     app.state.wallabag_client = WallabagClient(settings)

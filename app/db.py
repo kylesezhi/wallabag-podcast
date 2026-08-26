@@ -321,6 +321,24 @@ def get_episode_wallabag_id(conn: sqlite3.Connection, episode_id: int) -> int | 
     return int(row[0]) if row is not None else None
 
 
+def get_episode_progress(
+    conn: sqlite3.Connection, episode_id: int
+) -> tuple[int | None, int | None]:
+    """Return ``(progress_done, progress_total)`` persisted for the episode.
+
+    ``(None, None)`` when no progress has been recorded — the episode failed
+    before chunk synthesis began (e.g. the Wallabag fetch raised). Used by the
+    generation pipeline to annotate failure logs with the chunk position.
+    """
+    row = conn.execute(
+        "SELECT progress_done, progress_total FROM episodes WHERE id=?",
+        (episode_id,),
+    ).fetchone()
+    if row is None:
+        return None, None
+    return row[0], row[1]
+
+
 def get_queue_episodes(conn: sqlite3.Connection) -> list[dict]:
     """Return the visible queue (staged/generating/done/failed), oldest first.
 

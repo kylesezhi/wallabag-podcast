@@ -8,6 +8,7 @@ Kokoro) and measure_duration is monkeypatched so no real MP3 files are needed.
 
 import asyncio
 import json
+import logging
 import sqlite3
 
 import httpx
@@ -22,6 +23,7 @@ from app.db import (
     reset_failed_to_staged,
 )
 from app.kokoro import KokoroClient
+from app.logging_setup import configure_logging
 from app.pipeline import (
     _gap_silence,
     add_random,
@@ -1233,3 +1235,113 @@ async def test_generate_all_applies_pronunciations(env, monkeypatch):
     assert len(kokoro_calls) == 1
     assert "Jason" in sent
     assert "JSON" not in sent
+
+
+# ---------------------------------------------------------------------------
+# Logging + error traceability (see backend-logging spec)
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def logging_restore():
+    """Save and restore the root logger config around logging_setup tests.
+
+    configure_logging() mutates the global root logger; without this, handlers
+    pointing at a torn-down tmp_path would leak into later tests. Restores the
+    prior handlers + level (closing any handlers configure_logging installed).
+    """
+    root = logging.getLogger()
+    saved_handlers = list(root.handlers)
+    saved_level = root.level
+    yield
+    for handler in list(root.handlers):
+        root.removeHandler(handler)
+        try:
+            handler.close()
+        except Exception:
+            pass
+    for handler in saved_handlers:
+        root.addHandler(handler)
+    root.setLevel(saved_level)
+
+
+def _flush_root_handlers() -> None:
+    for handler in logging.getLogger().handlers:
+        handler.flush()
+
+
+def test_configure_logging_creates_log_file(env, logging_restore):
+    configure_logging(get_settings())
+    log_file = env / "logs" / "wallabag-podcast.log"
+    assert log_file.is_file()
+
+    logging.getLogger("app.test").info("hello from test")
+    _flush_root_handlers()
+
+    assert "hello from test" in log_file.read_text()
+
+
+def test_configure_logging_respects_log_level(env, logging_restore):
+    settings = _settings(DATA_DIR=str(env), LOG_LEVEL="WARNING")
+    configure_logging(settings)
+    log_file = env / "logs" / "wallabag-podcast.log"
+
+    logging.getLogger("app.test").info("info should be filtered")
+    logging.getLogger("app.test").warning("warning should pass")
+    _flush_root_handlers()
+
+    text = log_file.read_text()
+    assert "info should be filtered" not in text
+    assert "warning should pass" in text
+
+
+async def test_unexpected_failure_stores_type_and_writes_traceback(
+    env, monkeypatch, logging_restore
+):
+    configure_logging(get_settings())
+    with sqlite3.connect(get_db_path()) as conn:
+        _insert_staged(conn, [(1, "Article One")])
+
+    def boom(*args, **kwargs):
+        raise ValueError("kaboom")
+
+    # An unexpected (non-Kokoro/Wallabag) failure mid-pipeline: the short
+    # reason goes in episodes.error; the full traceback goes to the log file.
+    monkeypatch.setattr("app.pipeline.build_tts_input_from_article", boom)
+
+    wallabag = _make_wallabag(_wallabag_ok_handler())
+    kokoro = _make_kokoro(lambda request: httpx.Response(200, content=b"FAKE_MP3"))
+
+    summary = await generate_all(wallabag, kokoro, settings=get_settings())
+
+    assert summary == {"total": 1, "done": 0, "failed": 1, "skipped": 0}
+
+    log_file = env / "logs" / "wallabag-podcast.log"
+    with sqlite3.connect(get_db_path()) as conn:
+        episodes = _episode_rows(conn)
+        assert episodes[0]["status"] == "failed"
+        assert "ValueError" in episodes[0]["error"]
+        assert "kaboom" in episodes[0]["error"]
+
+    text = log_file.read_text()
+    assert "Traceback" in text
+    assert "ValueError" in text
+    assert "kaboom" in text
+
+
+async def test_lifecycle_logs_on_success(env, monkeypatch, logging_restore):
+    configure_logging(get_settings())
+    with sqlite3.connect(get_db_path()) as conn:
+        _insert_staged(conn, [(1, "Article One")])
+
+    wallabag = _make_wallabag(_wallabag_ok_handler())
+    kokoro = _make_kokoro(lambda request: httpx.Response(200, content=b"FAKE_MP3"))
+    monkeypatch.setattr("app.pipeline.measure_duration", lambda audio_path: 60)
+
+    summary = await generate_all(wallabag, kokoro, settings=get_settings())
+    assert summary == {"total": 1, "done": 1, "failed": 0, "skipped": 0}
+
+    text = (env / "logs" / "wallabag-podcast.log").read_text()
+    assert "Generation run started: 1 staged episodes" in text
+    assert "Generating episode 1 (wallabag=1, 1 chunks)" in text
+    assert "Episode 1 done: 60s audio, 1 chunks" in text

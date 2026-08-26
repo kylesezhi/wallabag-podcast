@@ -81,6 +81,9 @@ class Settings(BaseSettings):
     # values floor to whole seconds, 0 disables the pause.
     EPISODE_GAP_SECONDS: float = 3.0
     FEED_TITLE: str = "Kyle's Morning Podcast"
+    # Verbosity for the app + uvicorn loggers (root level). DEBUG/INFO/WARNING/ERROR.
+    # A rotating log file is written to DATA_DIR/logs/ (see app/logging_setup.py).
+    LOG_LEVEL: str = "INFO"
     # NoDecode/BeforeValidator as above; the comma-separated KEY=SPOKEN pairs
     # become a dict of whole-word, case-insensitive spoken-form rewrites
     # applied to the TTS text (see app/textclean.py).
