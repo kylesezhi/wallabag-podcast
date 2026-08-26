@@ -1,5 +1,9 @@
 # Spec: delete-archives-wallabag
 
+> **Superseded** by `split-delete-archive`. The per-episode Delete button no
+> longer archives in Wallabag; archiving is now a separate independent action
+> (`POST /queue/{id}/archive`). This spec is retained for historical reference.
+
 Scope: feature
 
 # Feature: Delete archives in Wallabag

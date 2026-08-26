@@ -381,7 +381,14 @@ a.queue-item-title:hover {
   transition: width 0.4s ease;
 }
 
-.queue-item-delete {
+.queue-item-actions {
+  display: flex;
+  gap: 0.4rem;
+  align-items: center;
+  margin: 0;
+}
+
+.queue-item-actions form {
   margin: 0;
 }
 
@@ -398,6 +405,22 @@ a.queue-item-title:hover {
 
 .btn-delete:hover {
   background: var(--danger);
+  color: #fff;
+}
+
+.btn-archive {
+  background: transparent;
+  border: 1.5px solid var(--tan);
+  color: var(--tan);
+  padding: 0.3rem 0.7rem;
+  border-radius: 8px;
+  font-size: 0.8rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.btn-archive:hover {
+  background: var(--tan);
   color: #fff;
 }
 

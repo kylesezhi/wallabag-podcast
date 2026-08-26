@@ -427,8 +427,6 @@ def test_add_random_wallabag_error(client, monkeypatch):
 
 
 def test_delete_staged(client):
-    spy = _ArchiveSpyWallabag()
-    app.state.wallabag_client = spy
     with sqlite3.connect(get_db_path()) as conn:
         _insert_staged(conn, [(1, "To Delete")])
         episode_id = conn.execute(
@@ -439,7 +437,6 @@ def test_delete_staged(client):
 
     assert response.status_code == 303
     assert "message" in response.headers["location"]
-    assert spy.archive_calls == [1]
     with sqlite3.connect(get_db_path()) as conn:
         row = conn.execute(
             "SELECT status FROM episodes WHERE id=?", (episode_id,)
@@ -448,8 +445,6 @@ def test_delete_staged(client):
 
 
 def test_delete_done_succeeds(client, env):
-    spy = _ArchiveSpyWallabag()
-    app.state.wallabag_client = spy
     audio_path = _write_audio_file(env, 5)
     with sqlite3.connect(get_db_path()) as conn:
         _insert_done_audio(conn, 5, "Done Article", audio_path)
@@ -466,7 +461,7 @@ def test_delete_done_succeeds(client, env):
     response = client.post(f"/queue/{episode_id}/delete", follow_redirects=False)
 
     assert response.status_code == 303
-    assert spy.archive_calls == [5]
+    assert "message" in response.headers["location"]
     with sqlite3.connect(get_db_path()) as conn:
         row = conn.execute(
             "SELECT status FROM episodes WHERE id=?", (episode_id,)
@@ -480,7 +475,72 @@ def test_delete_done_succeeds(client, env):
     assert processed is None
 
 
-def test_delete_wallabag_error_keeps_episode(client, env):
+def test_delete_nonexistent(client):
+    response = client.post("/queue/9999/delete", follow_redirects=False)
+
+    assert response.status_code == 303
+    assert "error" in response.headers["location"]
+
+
+def test_generate_no_staged(client):
+    response = client.post("/queue/generate", follow_redirects=False)
+
+    assert response.status_code == 303
+    assert "error" in response.headers["location"]
+
+
+# ---------------------------------------------------------------------------
+# Queue actions: archive route (Wallabag mark-read, no local deletion)
+# ---------------------------------------------------------------------------
+
+
+def test_archive_staged(client):
+    spy = _ArchiveSpyWallabag()
+    app.state.wallabag_client = spy
+    with sqlite3.connect(get_db_path()) as conn:
+        _insert_staged(conn, [(1, "To Archive")])
+        episode_id = conn.execute(
+            "SELECT id FROM episodes WHERE wallabag_id=1"
+        ).fetchone()[0]
+
+    response = client.post(f"/queue/{episode_id}/archive", follow_redirects=False)
+
+    assert response.status_code == 303
+    assert "message" in response.headers["location"]
+    assert spy.archive_calls == [1]
+    with sqlite3.connect(get_db_path()) as conn:
+        row = conn.execute(
+            "SELECT status FROM episodes WHERE id=?", (episode_id,)
+        ).fetchone()
+    assert row is not None
+    assert row[0] == "staged"
+
+
+def test_archive_done_keeps_episode_and_mp3(client, env):
+    spy = _ArchiveSpyWallabag()
+    app.state.wallabag_client = spy
+    audio_path = _write_audio_file(env, 5)
+    with sqlite3.connect(get_db_path()) as conn:
+        _insert_done_audio(conn, 5, "Done Article", audio_path)
+        episode_id = conn.execute(
+            "SELECT id FROM episodes WHERE wallabag_id=5"
+        ).fetchone()[0]
+
+    response = client.post(f"/queue/{episode_id}/archive", follow_redirects=False)
+
+    assert response.status_code == 303
+    assert "message" in response.headers["location"]
+    assert spy.archive_calls == [5]
+    with sqlite3.connect(get_db_path()) as conn:
+        row = conn.execute(
+            "SELECT status FROM episodes WHERE id=?", (episode_id,)
+        ).fetchone()
+    assert row is not None
+    assert row[0] == "done"
+    assert audio_path.exists() is True
+
+
+def test_archive_wallabag_error_keeps_episode(client, env):
     from app.wallabag import WallabagError
 
     spy = _ArchiveSpyWallabag(error=WallabagError("connection refused"))
@@ -491,16 +551,9 @@ def test_delete_wallabag_error_keeps_episode(client, env):
         episode_id = conn.execute(
             "SELECT id FROM episodes WHERE wallabag_id=9"
         ).fetchone()[0]
-        conn.execute(
-            "INSERT INTO processed_articles (wallabag_id, episode_id, processed_at) "
-            "VALUES (?, ?, '2026-01-02T00:00:00+00:00')",
-            (9, episode_id),
-        )
-        conn.commit()
 
-    response = client.post(f"/queue/{episode_id}/delete", follow_redirects=False)
+    response = client.post(f"/queue/{episode_id}/archive", follow_redirects=False)
 
-    # Archive was attempted and failed: error flash + nothing deleted.
     assert response.status_code == 303
     assert "error" in response.headers["location"]
     assert spy.archive_calls == [9]
@@ -508,30 +561,19 @@ def test_delete_wallabag_error_keeps_episode(client, env):
         row = conn.execute(
             "SELECT status FROM episodes WHERE id=?", (episode_id,)
         ).fetchone()
-        processed = conn.execute(
-            "SELECT 1 FROM processed_articles WHERE wallabag_id=9"
-        ).fetchone()
     assert row is not None
     assert row[0] == "done"
-    assert processed is not None
     assert audio_path.exists() is True
 
 
-def test_delete_nonexistent(client):
+def test_archive_nonexistent(client):
     spy = _ArchiveSpyWallabag()
     app.state.wallabag_client = spy
-    response = client.post("/queue/9999/delete", follow_redirects=False)
+    response = client.post("/queue/9999/archive", follow_redirects=False)
 
     assert response.status_code == 303
     assert "error" in response.headers["location"]
     assert spy.archive_calls == []
-
-
-def test_generate_no_staged(client):
-    response = client.post("/queue/generate", follow_redirects=False)
-
-    assert response.status_code == 303
-    assert "error" in response.headers["location"]
 
 
 def test_generate_starts(client, monkeypatch):
@@ -679,8 +721,6 @@ def test_stop_active_run(client, monkeypatch):
 
 
 async def test_delete_active_generating_triggers_stop(client):
-    spy = _ArchiveSpyWallabag()
-    app.state.wallabag_client = spy
     with sqlite3.connect(get_db_path()) as conn:
         _insert_generating(conn, 42, "In Flight")
         episode_id = conn.execute(
@@ -709,10 +749,7 @@ async def test_delete_active_generating_triggers_stop(client):
             pass
         assert task.cancelled()
 
-        # The stop branch never archives: nothing was deleted.
-        assert spy.archive_calls == []
-
-        # The row is NOT deleted — during an active run the loop owns it.
+        # The stop branch never deletes: nothing was deleted.
         with sqlite3.connect(get_db_path()) as conn:
             row = conn.execute(
                 "SELECT status FROM episodes WHERE id=?", (episode_id,)
@@ -729,8 +766,6 @@ async def test_delete_active_generating_triggers_stop(client):
 
 
 def test_delete_orphan_generating_deletes(client):
-    spy = _ArchiveSpyWallabag()
-    app.state.wallabag_client = spy
     with sqlite3.connect(get_db_path()) as conn:
         _insert_generating(conn, 7, "Orphaned Episode")
         episode_id = conn.execute(
@@ -744,7 +779,6 @@ def test_delete_orphan_generating_deletes(client):
 
         assert response.status_code == 303
         assert "message" in response.headers["location"]
-        assert spy.archive_calls == [7]
 
         with sqlite3.connect(get_db_path()) as conn:
             row = conn.execute(
@@ -803,9 +837,10 @@ def test_delete_button_shown_for_generating_during_run(client):
 
         assert response.status_code == 200
         assert "status-badge-generating" in response.text
-        # The button always renders; clicking it mid-run triggers the stop
+        # Both buttons always render; clicking delete mid-run triggers the stop
         # flow (queue_delete cancels the task instead of deleting directly).
         assert f'action="/queue/{episode_id}/delete"' in response.text
+        assert f'action="/queue/{episode_id}/archive"' in response.text
         assert "data-confirm-message" in response.text
     finally:
         app.state.generating = False
@@ -826,6 +861,7 @@ def test_delete_button_shown_for_orphan_generating(client):
 
         assert response.status_code == 200
         assert f'action="/queue/{episode_id}/delete"' in response.text
+        assert f'action="/queue/{episode_id}/archive"' in response.text
         assert "data-confirm-message" in response.text
     finally:
         app.state.generating = False
@@ -849,13 +885,16 @@ def test_delete_button_shown_for_staged_and_failed(client):
         response = client.get("/")
 
         assert response.status_code == 200
+        # Both Delete and Archive buttons render for each episode.
         assert f'action="/queue/{staged_id}/delete"' in response.text
+        assert f'action="/queue/{staged_id}/archive"' in response.text
         assert f'action="/queue/{failed_id}/delete"' in response.text
-        # The modal prompt now covers all statuses, not just done.
-        # Staged/failed copy omits the mp3-removal detail (no audio to lose).
+        assert f'action="/queue/{failed_id}/archive"' in response.text
+        # Delete confirm copy for staged/failed does NOT mention mp3.
         assert "remove its audio file" not in response.text
         assert 'data-confirm="true"' not in response.text
-        assert response.text.count("data-confirm-message") >= 2
+        # 2 episodes × 2 buttons = at least 4 data-confirm-message attrs.
+        assert response.text.count("data-confirm-message") >= 4
     finally:
         app.state.generating = False
         app.state.generation_task = None
@@ -876,6 +915,7 @@ def test_delete_button_shown_for_done_with_confirm(client, env):
 
         assert response.status_code == 200
         assert f'action="/queue/{episode_id}/delete"' in response.text
+        assert f'action="/queue/{episode_id}/archive"' in response.text
         # The done-episode modal copy warns about irreversible mp3 loss.
         assert "data-confirm-message" in response.text
         assert "remove its audio file" in response.text
@@ -915,7 +955,10 @@ def test_archive_button_absent(client):
     response = client.get("/")
 
     assert response.status_code == 200
+    # The OLD bulk "Archive Completed" button must not reappear.
     assert "Archive Completed" not in response.text
+    # Per-item Archive buttons ARE present for each episode.
+    assert response.text.count('action="/queue/') >= 2  # at least delete+archive per episode
 
 
 # ---------------------------------------------------------------------------

@@ -12,8 +12,7 @@ episode is removed without an explicit second action.
 
 ## Scope
 - Frontend only: `templates/index.html`, `static/js/app.js`, `static/css/style.css`.
-- No backend changes — the `POST /queue/{id}/delete` route and `app/pipeline.delete_item`
-  are untouched. The modal is purely a client-side gate in front of the existing form submit.
+- No backend changes — the `POST /queue/{id}/delete`, `POST /queue/{id}/archive` routes and `app/pipeline` functions are untouched. The modal is purely a client-side gate in front of existing form submits.
 
 ## Behavior contract
 
@@ -34,21 +33,22 @@ episode is removed without an explicit second action.
   needed (contrast with `requestSubmit()`, which re-fires submit and would loop).
 
 ### Copy (status-aware, set in the Jinja template)
-| Episode status | `data-confirm-message` |
-|---|---|
-| `done` | "Delete this episode, remove its audio file, and mark the article as read in Wallabag?" |
-| `staged`, `failed`, `generating` (orphan) | "Delete this episode and mark the article as read in Wallabag?" |
+| Action  | Episode status | `data-confirm-message` | `data-confirm-label` |
+| ------- | -------------- | ---------------------- | -------------------- |
+| Delete  | done           | Delete this episode and remove its audio file? The article stays unread in Wallabag. | Delete |
+| Delete  | staged/failed/generating | Delete this episode from the podcast? The article stays unread in Wallabag. | Delete |
+| Archive | all            | Mark this article as read in Wallabag? The episode stays in your podcast. | Archive |
 
-The done copy mentions mp3/audio removal because that loss is irreversible; all other
-statuses only remove the queue row and mark the Wallabag article read.
+The done delete copy mentions mp3/audio removal because that loss is irreversible.
+The archive copy mentions the episode staying because no local deletion occurs.
 
 ### Known edge case
 When the episode is `generating` **during an active run**, `queue_delete`
 (`app/main.py`) cancels the generation task instead of deleting — it redirects with
 "Stopping generation..." and leaves the row (now `failed`) in the queue. The modal copy
 ("Delete this episode...") is slightly inaccurate for this rare path, but it is strictly
-better than the prior behaviour (no confirmation at all). Refine later if it becomes a
-real source of confusion.
+better than no confirmation at all. The Archive button on a generating episode during an
+active run just archives (no stop; no inaccuracy).
 
 ## Accessibility
 - Modal container uses `role="dialog"` + `aria-modal="true"`, title referenced via

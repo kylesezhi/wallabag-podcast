@@ -40,6 +40,7 @@ from .kokoro import KokoroClient
 from .logging_setup import configure_logging
 from .pipeline import (
     add_random,
+    archive_item,
     clear_queue,
     delete_item,
     generate_all,
@@ -346,17 +347,24 @@ async def queue_delete(episode_id: int):
             task.cancel()
         return _redirect("/", message="Stopping generation...")
     try:
-        await delete_item(episode_id, app.state.wallabag_client)
+        delete_item(episode_id)
+    except ValueError as exc:
+        return _redirect("/", error=str(exc))
+    return _redirect("/", message="Removed from podcast (article stays unread in Wallabag)")
+
+
+@app.post("/queue/{episode_id}/archive")
+async def queue_archive(episode_id: int):
+    try:
+        await archive_item(episode_id, app.state.wallabag_client)
     except ValueError as exc:
         return _redirect("/", error=str(exc))
     except WallabagError as exc:
-        # The Wallabag archive failed before anything was deleted locally:
-        # the episode is still in the queue and can be retried.
         return _redirect(
             "/",
             error=f"Could not mark article as read in Wallabag: {exc}",
         )
-    return _redirect("/", message="Deleted from queue (article marked read)")
+    return _redirect("/", message="Article marked read in Wallabag (episode kept in podcast)")
 
 
 @app.post("/queue/generate")

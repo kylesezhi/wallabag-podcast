@@ -91,9 +91,14 @@
           </p>
         </div>
         {% if ep.status in ("staged", "failed", "done", "generating") %}
-        <form method="post" action="/queue/{{ ep.id }}/delete" class="queue-item-delete" data-confirm-message="{{ 'Delete this episode, remove its audio file, and mark the article as read in Wallabag?' if ep.status == 'done' else 'Delete this episode and mark the article as read in Wallabag?' }}">
-          <button type="submit" class="btn-delete" title="Delete episode" aria-label="Delete {{ ep.title }}">Delete</button>
-        </form>
+        <div class="queue-item-actions">
+          <form method="post" action="/queue/{{ ep.id }}/delete" data-confirm-message="{{ 'Delete this episode and remove its audio file? The article stays unread in Wallabag.' if ep.status == 'done' else 'Delete this episode from the podcast? The article stays unread in Wallabag.' }}" data-confirm-label="Delete">
+            <button type="submit" class="btn-delete" title="Delete from podcast" aria-label="Delete {{ ep.title }} from podcast">Delete</button>
+          </form>
+          <form method="post" action="/queue/{{ ep.id }}/archive" data-confirm-message="Mark this article as read in Wallabag? The episode stays in your podcast." data-confirm-label="Archive">
+            <button type="submit" class="btn-archive" title="Archive in Wallabag" aria-label="Archive {{ ep.title }} in Wallabag">Archive</button>
+          </form>
+        </div>
         {% endif %}
       </li>
       {% endfor %}

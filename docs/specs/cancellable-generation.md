@@ -34,32 +34,33 @@ A user can stop a generation run that is in progress (aborting the in-flight TTS
 
 `generating` becomes a deletable status, covering two cases:
 
-1. **Orphan (no active run):** episode stuck in `generating` after a crash/restart. `db.delete_episode` allows `'generating'`. The Delete button always renders on `generating` episodes; with no active run the delete route archives the article in Wallabag then deletes directly.
-2. **Active run, target is the generating episode:** the per-item delete route does NOT delete directly (the loop owns that row). Instead it triggers the same cancellation as the Stop button: `task.cancel()`. No Wallabag archive call is made (nothing was deleted). The loop marks the episode `failed`, the existing `/queue/status` polling JS reloads the page, and the user then clicks Delete on the now-`failed` row.
+1. **Orphan (no active run):** episode stuck in `generating` after a crash/restart. `db.delete_episode` allows `'generating'`. The Delete button always renders on `generating` episodes; with no active run the delete route deletes directly (no Wallabag call). The Archive button also renders and just marks the article read in Wallabag.
+2. **Active run, target is the generating episode:** the per-item delete route does NOT delete directly (the loop owns that row). Instead it triggers the same cancellation as the Stop button: `task.cancel()`. The loop marks the episode `failed`, the existing `/queue/status` polling JS reloads the page, and the user then clicks Delete on the now-`failed` row. The Archive button on a generating episode during an active run just archives (no conflict with the loop; no stop).
 
-`archived` / missing episodes remain non-deletable (unchanged ValueError behavior; no archive call); `done` episodes ARE deletable (archives in Wallabag, unlinks mp3 + removes the dedupe row).
+`archived` / missing episodes remain non-deletable/non-archivable (unchanged ValueError behavior).
 
 ## Routes
 
 - `POST /queue/stop` (NEW): if a generation task is active and not done, `task.cancel()` and redirect to `/` with message `"Stopping generation…"`. If no run is active, redirect with error `"No generation run to stop"`.
-- `POST /queue/{episode_id}/delete` (UPDATED): for a `generating` target during an active run → trigger stop (cancel task), redirect with message `"Stopping generation…"` (the loop will mark it failed; reload shows the Delete button on the now-failed row; no archive call). For a `generating` target with no active run → archive in Wallabag, then delete directly (orphan cleanup). For `staged`/`failed`/`done` → archive in Wallabag first (abort-on-failure: a `WallabagError` redirects with an error and nothing is deleted), then direct delete (for `done`, also unlinks the mp3 and deletes the processed_articles row). For `archived`/missing → `ValueError` (unchanged, no archive call).
+- `POST /queue/{episode_id}/delete` (UPDATED): for a `generating` target during an active run → trigger stop (cancel task), redirect with message `"Stopping generation…"` (the loop will mark it failed; reload shows the Delete button on the now-failed row). For a `generating` target with no active run → delete directly (orphan cleanup, no Wallabag call). For `staged`/`failed`/`done` → delete locally (no Wallabag call; for `done`, also unlinks the mp3 and deletes the processed_articles row). For `archived`/missing → `ValueError` (unchanged).
+- `POST /queue/{episode_id}/archive` (NEW): marks the article as read in Wallabag (`PATCH archive=1`). For any status (staged/failed/generating/done): archive only, no local deletion. During an active run, archiving a generating episode just archives (no stop; no conflict with the loop). For `archived`/missing → `ValueError`.
 
 ## UI
 
 - **Global Stop button:** rendered inside the progress card (`#generation-progress`), shown ONLY while `generating` is true. POSTs to `/queue/stop`.
-- **Per-item Delete button:** renders for `staged`, `failed`, `done`, AND `generating` — unconditionally (the earlier `not generating` gating was removed so the button is always visible; during an active run clicking it triggers the stop flow described above). Done-episode delete forms carry a `data-confirm` attribute; a small JS handler calls `confirm()` before submitting (guards irreversible mp3 loss).
-- **JS:** the existing polling logic in `static/js/app.js` is unchanged (polls `/queue/status` and reloads when `generating` flips false). A new small IIFE adds the confirm guard for `form[data-confirm="true"]`. After a stop, the cancelled episode is already `failed` in the DB by the time `generating` goes false, so the reload shows it with a Delete button.
+- **Per-item buttons:** each episode shows two side-by-side buttons — **Delete** (POSTs to `/queue/{id}/delete`, styled `.btn-delete`) and **Archive** (POSTs to `/queue/{id}/archive`, styled `.btn-archive`). Both render for `staged`, `failed`, `done`, AND `generating` — unconditionally. Both carry `data-confirm-message` (status-aware) and `data-confirm-label` ("Delete" or "Archive") for the styled confirmation modal. The Delete button's confirm copy for done episodes mentions mp3 removal; the Archive button's copy mentions the episode staying in the podcast.
+- **JS:** the existing polling logic in `static/js/app.js` is unchanged (polls `/queue/status` and reloads when `generating` flips false). The modal IIFE intercepts `form[data-confirm-message]`, reads the `data-confirm-label` to set the confirm button text, and submits on confirm. No changes needed for the split.
 
 ## Docs
-- `docs/specs/data-model.md`: state machine gains `generating --(cancel)--> failed`; queue-ops section adds `stop_generation()` and notes `delete_item()` allows `generating` AND `done`.
-- `README.md` "Using the app": document Stop + deleting stuck (orphaned generating) episodes.
+- `docs/specs/data-model.md`: state machine gains `generating --(cancel)--> failed`; queue-ops section adds `stop_generation()`, `archive_item()`, and notes `delete_item()` is sync/no-Wallabag while `archive_item()` is async/Wallabag-only.
+- `README.md` "Using the app": document Stop + deleting stuck (orphaned generating) episodes + archiving.
 
 ## Acceptance criteria
 - Stop button halts an active run; the in-flight episode ends up `failed` ("Cancelled by user"); remaining staged episodes stay `staged` and can be generated later; `processed_articles` untouched for the cancelled episode.
-- Every `generating` episode (orphaned or in-flight during a run) shows a Delete button.
-- Delete-on-active-generating triggers stop (does not delete directly); after reload the episode is `failed` with a Delete button.
-- `delete_item` for `archived`/missing still raises `ValueError` (no archive call); `done` episodes are deletable (mp3 unlinked, processed_articles row removed).
-- Every real delete archives the article in Wallabag first (`PATCH archive=1`); a failed archive call leaves the episode row, mp3, and dedupe row untouched and the UI shows an error flash.
-- Deleting a `done` episode removes its mp3 from disk and its processed_articles row; a JS `confirm()` prompts before the delete submits.
+- Every `generating` episode (orphaned or in-flight during a run) shows both a Delete button and an Archive button.
+- Delete-on-active-generating triggers stop (does not delete directly); after reload the episode is `failed` with a Delete button. Archive-on-active-generating just archives (no stop; no conflict).
+- `delete_item` for `archived`/missing still raises `ValueError`; `done` episodes are deletable (mp3 unlinked, processed_articles row removed, article stays unread).
+- `archive_item` marks the article read in Wallabag; nothing local is deleted. A `WallabagError` leaves the episode row, mp3, and dedupe row untouched.
+- Deleting a `done` episode removes its mp3 from disk and its processed_articles row; a styled confirmation modal prompts before the delete submits.
 - The `archived` status is no longer set by any UI flow; legacy archived rows remain hidden.
-- All existing tests pass; new tests cover in-flight cancel, pre-start cancel, orphan delete, stop route (active + inactive), delete-on-active-generating triggers stop, UI button visibility.
+- All existing tests pass; new tests cover in-flight cancel, pre-start cancel, orphan delete, stop route (active + inactive), delete-on-active-generating triggers stop, archive route, UI button visibility.

@@ -92,9 +92,12 @@ the UI or the database, only in `.env`.
 
 1. Open the home page. Click **Add Random** to stage N random unread articles
    (N is set under **Settings** → *Articles per drive*, default 10).
-2. Review the queue and click **Delete** on any article you don't want.
-   Deleting also marks the article as read (archived) in Wallabag — if that
-   fails, nothing is deleted and the episode stays queued so you can retry.
+2. Review the queue. Each episode has two buttons:
+   - **Delete** removes the episode from the podcast (deletes the queue row and,
+     for finished episodes, the MP3 file and dedupe record). The article stays
+     unread in Wallabag and can be re-picked by **Add Random** later.
+   - **Archive** marks the article as read in Wallabag. The episode stays in the
+     podcast (MP3 and RSS entry untouched).
 3. Click **Generate Audio** — each article is fetched, cleaned, and
    synthesized into an MP3. Progress updates live on the page as episodes flip
    from `generating` to `done` (or `failed` with a reason).
@@ -109,16 +112,14 @@ the UI or the database, only in `.env`.
    `staged` so you can generate them later.
 6. When you're happy with the drive, click **Delete** on any finished episode
    to remove it from the feed and delete its MP3 file — you'll get a quick
-   confirm prompt first since the audio is gone for good. Deleting an episode
-   also marks its Wallabag article as read, so **Add Random** won't offer it
-   again (archived articles are never re-enumerated). **Clear Staged** drops
+   confirm prompt first since the audio is gone for good. **Clear Staged** drops
    the staged/failed items without touching completed ones.
 7. An episode can get stuck in `generating` if the process is restarted
-   mid-run. Its **Delete** button always appears, so you can remove it like
-   any other item (marking the article read in Wallabag). Clicking **Delete**
-   on the in-flight episode during an active run stops the run first — the
-   episode flips to `failed` and you can delete it again — or use **Stop
-   Generating** directly.
+   mid-run. Its **Delete** and **Archive** buttons always appear. Clicking
+   **Delete** on the in-flight episode during an active run stops the run first
+   — the episode flips to `failed` and you can delete it again — or use **Stop
+   Generating** directly. **Archive** on a generating episode just marks the
+   article read without affecting the generation loop.
 
 ## Subscribing in a podcast app
 
