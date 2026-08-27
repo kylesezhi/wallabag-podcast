@@ -154,6 +154,18 @@ def _redirect(path: str, *, message: str | None = None, error: str | None = None
     return RedirectResponse(location, status_code=303)
 
 
+def _json_or_redirect(request: Request, path: str, *, message: str | None = None, error: str | None = None):
+    """Return JSON for AJAX requests, otherwise a 303 redirect."""
+    if "application/json" in request.headers.get("accept", ""):
+        payload: dict[str, object] = {"ok": error is None}
+        if message is not None:
+            payload["message"] = message
+        if error is not None:
+            payload["error"] = error
+        return JSONResponse(payload)
+    return _redirect(path, message=message, error=error)
+
+
 async def _run_generation(app: FastAPI) -> None:
     """Background task: generate audio for all staged episodes.
 
@@ -332,7 +344,7 @@ async def queue_add_random():
 
 
 @app.post("/queue/{episode_id}/delete")
-async def queue_delete(episode_id: int):
+async def queue_delete(request: Request, episode_id: int):
     conn = connect()
     try:
         status = get_episode_status(conn, episode_id)
@@ -345,26 +357,27 @@ async def queue_delete(episode_id: int):
         task = getattr(app.state, "generation_task", None)
         if task is not None and not task.done():
             task.cancel()
-        return _redirect("/", message="Stopping generation...")
+        return _json_or_redirect(request, "/", message="Stopping generation...")
     try:
         delete_item(episode_id)
     except ValueError as exc:
-        return _redirect("/", error=str(exc))
-    return _redirect("/", message="Removed from podcast (article stays unread in Wallabag)")
+        return _json_or_redirect(request, "/", error=str(exc))
+    return _json_or_redirect(request, "/", message="Removed from podcast (article stays unread in Wallabag)")
 
 
 @app.post("/queue/{episode_id}/archive")
-async def queue_archive(episode_id: int):
+async def queue_archive(request: Request, episode_id: int):
     try:
         await archive_item(episode_id, app.state.wallabag_client)
     except ValueError as exc:
-        return _redirect("/", error=str(exc))
+        return _json_or_redirect(request, "/", error=str(exc))
     except WallabagError as exc:
-        return _redirect(
+        return _json_or_redirect(
+            request,
             "/",
             error=f"Could not mark article as read in Wallabag: {exc}",
         )
-    return _redirect("/", message="Article marked read in Wallabag (episode kept in podcast)")
+    return _json_or_redirect(request, "/", message="Article marked read in Wallabag (episode kept in podcast)")
 
 
 @app.post("/queue/generate")

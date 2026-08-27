@@ -161,10 +161,43 @@
 
   function confirmDelete() {
     var form = pendingForm;
-    close();
-    if (form) {
-      form.submit();
+    if (!form) {
+      close();
+      return;
     }
+    var isDelete = form.action.indexOf("/delete") !== -1;
+    var queueItem = form.closest(".queue-item");
+    close();
+
+    fetch(form.action, {
+      method: "POST",
+      headers: { Accept: "application/json" },
+    })
+      .then(function (resp) {
+        return resp.json();
+      })
+      .then(function (data) {
+        if (!data.ok) {
+          if (body) {
+            body.textContent = data.error || "Something went wrong.";
+          }
+          overlay.hidden = false;
+          return;
+        }
+        if (isDelete && queueItem) {
+          queueItem.remove();
+          var search = document.getElementById("queue-title-filter");
+          if (search) {
+            search.dispatchEvent(new Event("input"));
+          }
+        }
+      })
+      .catch(function () {
+        if (body) {
+          body.textContent = "Network error. Please try again.";
+        }
+        overlay.hidden = false;
+      });
   }
 
   document.addEventListener("submit", function (event) {
