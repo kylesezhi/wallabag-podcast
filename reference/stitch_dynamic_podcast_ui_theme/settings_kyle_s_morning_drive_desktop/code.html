@@ -1,0 +1,243 @@
+<!DOCTYPE html><html class="dark" lang="en" style=""><head>
+<meta charset="utf-8">
+<meta content="width=device-width, initial-scale=1.0" name="viewport">
+<title>Settings - Kyle's Morning Drive</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&amp;family=Space+Grotesk:wght@400;700&amp;display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet">
+<style>
+        .material-symbols-outlined {
+            font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+        }
+        /* Dithered background pattern */
+        .bg-dither {
+            background-image: radial-gradient(var(--tw-colors-outline-variant) 1px, transparent 1px);
+            background-size: 4px 4px;
+        }
+        
+        /* Custom Range Slider */
+        input[type=range]::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            height: 20px;
+            width: 20px;
+            border-radius: 0;
+            background: #ff9d00;
+            cursor: pointer;
+            border: 2px solid #2c1700;
+        }
+        input[type=range]::-webkit-slider-runnable-track {
+            width: 100%;
+            height: 8px;
+            cursor: pointer;
+            background: #111415;
+            border: 2px solid #544433;
+        }
+    </style>
+<script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    colors: {
+                        "on-surface": "#e1e3e4",
+                        "tertiary-fixed": "#dfe2eb",
+                        "on-secondary-fixed": "#23005c",
+                        "surface": "#111415",
+                        "primary-container": "#ff9d00",
+                        "tertiary": "#cccfd8",
+                        "primary-fixed": "#ffdcbb",
+                        "outline-variant": "#544433",
+                        "on-primary-fixed-variant": "#673d00",
+                        "surface-container-high": "#282a2b",
+                        "on-tertiary": "#2d3137",
+                        "surface-bright": "#373a3b",
+                        "surface-variant": "#323536",
+                        "on-tertiary-container": "#42464d",
+                        "inverse-on-surface": "#2e3132",
+                        "inverse-surface": "#e1e3e4",
+                        "tertiary-fixed-dim": "#c3c6cf",
+                        "primary": "#ffc485",
+                        "on-primary-fixed": "#2c1700",
+                        "background": "#111415",
+                        "on-background": "#e1e3e4",
+                        "on-secondary-fixed-variant": "#522aa7",
+                        "inverse-primary": "#885200",
+                        "on-surface-variant": "#dac2ad",
+                        "secondary-fixed": "#e9ddff",
+                        "tertiary-container": "#b1b4bc",
+                        "surface-container-low": "#191c1d",
+                        "primary-fixed-dim": "#ffb869",
+                        "on-error-container": "#ffdad6",
+                        "error": "#ffb4ab",
+                        "on-tertiary-fixed": "#181c22",
+                        "on-error": "#690005",
+                        "surface-tint": "#ffb869",
+                        "secondary-container": "#552daa",
+                        "secondary-fixed-dim": "#d0bcff",
+                        "on-tertiary-fixed-variant": "#43474e",
+                        "on-primary": "#482900",
+                        "error-container": "#93000a",
+                        "surface-container": "#1d2021",
+                        "surface-dim": "#111415",
+                        "surface-container-highest": "#323536",
+                        "on-primary-container": "#663c00",
+                        "outline": "#a28d79",
+                        "secondary": "#d0bcff",
+                        "on-secondary-container": "#c3abff",
+                        "on-secondary": "#3b0191",
+                        "surface-container-lowest": "#0c0f10"
+                    },
+                    borderRadius: {
+                        "DEFAULT": "0.25rem",
+                        "lg": "0.5rem",
+                        "xl": "0.75rem",
+                        "full": "9999px"
+                    },
+                    spacing: {
+                        "base": "8px",
+                        "stack-md": "12px",
+                        "gutter": "16px",
+                        "margin-mobile": "20px",
+                        "stack-sm": "4px",
+                        "margin-desktop": "40px",
+                        "stack-lg": "24px"
+                    },
+                    fontFamily: {
+                        "label-sm": ["JetBrains Mono"],
+                        "body-md": ["JetBrains Mono"],
+                        "headline-xl": ["Space Grotesk"],
+                        "headline-lg-mobile": ["Space Grotesk"],
+                        "headline-lg": ["Space Grotesk"]
+                    },
+                    fontSize: {
+                        "label-sm": ["12px", { "lineHeight": "16px", "fontWeight": "500" }],
+                        "body-md": ["16px", { "lineHeight": "24px", "fontWeight": "400" }],
+                        "headline-xl": ["48px", { "lineHeight": "56px", "letterSpacing": "-0.02em", "fontWeight": "700" }],
+                        "headline-lg-mobile": ["24px", { "lineHeight": "32px", "fontWeight": "700" }],
+                        "headline-lg": ["32px", { "lineHeight": "40px", "fontWeight": "700" }]
+                    }
+                }
+            }
+        }
+    </script>
+</head>
+<body class="bg-background text-on-surface h-screen flex overflow-hidden font-body-md text-body-md">
+<!-- SideNavBar (Desktop Shell) -->
+
+<!-- Main Content Area -->
+<main class="flex-1 flex flex-col h-full overflow-hidden relative">
+<!-- TopAppBar (Mobile & Context Anchor) -->
+<header class="bg-background dark:bg-background w-full border-b-2 border-outline-variant flex justify-between items-center px-margin-mobile md:px-margin-desktop py-4 flex-shrink-0 z-10">
+<div class="flex items-center gap-stack-md">
+<span class="material-symbols-outlined text-primary text-3xl">directions_car</span>
+<h1 class="font-headline-lg-mobile text-headline-lg-mobile text-primary uppercase tracking-tighter">Kyle's Morning Drive</h1>
+</div>
+<h2 class="md:block font-headline-lg text-headline-lg text-on-surface tracking-tight">Settings</h2>
+<div class="flex items-center gap-stack-md">
+<button class="text-on-surface-variant hover:text-primary-container transition-colors cursor-pointer active:translate-y-0.5">
+<span class="material-symbols-outlined">settings</span>
+</button>
+
+</div>
+</header>
+<!-- Scrollable Content Canvas -->
+<div class="flex-1 overflow-y-auto p-margin-mobile md:p-margin-desktop relative w-full">
+<!-- Subtle Dither Background -->
+<div class="absolute inset-0 bg-dither opacity-20 pointer-events-none z-0"></div>
+<div class="max-w-5xl mx-auto grid grid-cols-1 md:grid-cols-2 gap-stack-lg relative z-10">
+<!-- Card 1: Wallabag Connection -->
+<section class="bg-surface-container border-2 border-outline-variant p-stack-lg shadow-[4px_4px_0px_0px_#544433] flex flex-col gap-stack-md">
+<h3 class="font-headline-lg-mobile text-headline-lg-mobile text-primary">Wallabag Connection</h3>
+<div class="flex items-center gap-stack-md">
+<span class="text-on-surface font-bold">Status:</span>
+<span class="bg-surface-tint/20 text-surface-tint border border-surface-tint font-label-sm text-label-sm px-2 py-1 uppercase rounded-sm">Connected</span>
+</div>
+<div>
+<label class="block text-on-surface-variant font-label-sm text-label-sm mb-1">URL</label>
+<div class="bg-surface border-2 border-outline-variant p-2 font-body-md text-on-surface overflow-x-auto whitespace-nowrap">
+                            http://192.168.42.223:8000/
+                        </div>
+</div>
+<p class="text-on-surface-variant text-sm mt-2">Credentials live only in your <code class="bg-surface px-1 py-0.5 border border-outline-variant rounded-sm text-primary">.env</code> file and are never shown here.</p>
+<button class="mt-auto bg-primary-container text-on-primary-container font-bold py-2 px-4 border-2 border-on-primary-fixed shadow-[4px_4px_0px_0px_#2c1700] hover:translate-y-[2px] hover:translate-x-[2px] hover:shadow-[2px_2px_0px_0px_#2c1700] transition-all w-fit active:scale-95">
+                        Test Connection
+                    </button>
+</section>
+<!-- Card 2: Generation Settings -->
+<section class="bg-surface-container border-2 border-outline-variant p-stack-lg shadow-[4px_4px_0px_0px_#544433] flex flex-col gap-stack-lg">
+<h3 class="font-headline-lg-mobile text-headline-lg-mobile text-primary">Generation Settings</h3>
+<div>
+<div class="flex justify-between items-center mb-stack-sm">
+<label class="font-bold text-on-surface">Articles per drive</label>
+<span class="font-headline-lg-mobile text-primary-container" id="slider-val">10</span>
+</div>
+<input class="w-full appearance-none bg-transparent" max="20" min="1" oninput="document.getElementById('slider-val').innerText = this.value" type="range" value="10">
+</div>
+<div>
+<label class="block font-bold text-on-surface mb-stack-sm">Voice</label>
+<div class="relative">
+<select class="w-full appearance-none bg-surface border-2 border-outline-variant text-on-surface p-3 font-body-md focus:border-primary-container focus:outline-none rounded-none cursor-pointer">
+<option>bm_daniel</option>
+<option>en_us_male</option>
+<option>en_us_female</option>
+</select>
+<span class="material-symbols-outlined absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none text-primary-container">expand_more</span>
+</div>
+</div>
+</section>
+<!-- Card 3: Podcast Settings -->
+<section class="bg-surface-container border-2 border-outline-variant p-stack-lg shadow-[4px_4px_0px_0px_#544433] flex flex-col gap-stack-md">
+<h3 class="font-headline-lg-mobile text-headline-lg-mobile text-primary">Podcast Settings</h3>
+<div class="grid grid-cols-[100px_1fr] gap-4 items-center border-b border-outline-variant/50 pb-2">
+<span class="font-bold text-on-surface text-sm">Feed title</span>
+<span class="text-on-surface-variant truncate">Kyle's Morning Drive</span>
+</div>
+<div class="grid grid-cols-[100px_1fr] gap-4 items-center">
+<span class="font-bold text-on-surface text-sm">Feed URL</span>
+<code class="text-primary truncate font-label-sm text-label-sm bg-surface p-1 border border-outline-variant">http://192.168.42.167:8000/feed.xml</code>
+</div>
+<p class="text-on-surface-variant text-sm mt-4">Change these via <code class="bg-surface px-1 py-0.5 border border-outline-variant rounded-sm text-primary">FEED_TITLE</code> and <code class="bg-surface px-1 py-0.5 border border-outline-variant rounded-sm text-primary">BASE_URL</code> in <code class="bg-surface px-1 py-0.5 border border-outline-variant rounded-sm text-primary">.env</code>.</p>
+</section>
+<!-- Card 4: Automation -->
+<section class="bg-surface-container border-2 border-outline-variant p-stack-lg shadow-[4px_4px_0px_0px_#544433] flex flex-col gap-stack-md opacity-80">
+<h3 class="font-headline-lg-mobile text-headline-lg-mobile text-primary">Automation</h3>
+<div class="flex justify-between items-center py-2 border-b border-outline-variant/50">
+<span class="font-bold text-on-surface">Generate every morning</span>
+<div class="flex items-center gap-2">
+<span class="font-label-sm text-label-sm text-primary-container border border-primary-container px-2 py-0.5 uppercase">Coming Soon</span>
+<div class="w-10 h-6 border-2 border-outline-variant bg-surface relative cursor-not-allowed">
+<!-- disabled toggle -->
+</div>
+</div>
+</div>
+<div class="flex justify-between items-center py-2 text-on-surface-variant">
+<span class="font-bold">Scheduled time</span>
+<span class="font-label-sm">--:-- AM</span>
+</div>
+</section>
+</div>
+</div>
+</main>
+<!-- BottomNavBar (Mobile Shell Fallback) -->
+<nav class="md:hidden fixed bottom-0 left-0 w-full flex justify-around items-center bg-surface py-2 px-margin-mobile border-t-2 border-outline-variant z-50 shadow-[0_-4px_10px_rgba(0,0,0,0.5)]">
+<a class="flex flex-col items-center justify-center text-on-surface-variant hover:text-primary transition-transform active:scale-90 p-2" href="#">
+<span class="material-symbols-outlined mb-1">home</span>
+<span class="font-label-sm text-label-sm">Home</span>
+</a>
+<a class="flex flex-col items-center justify-center text-on-surface-variant hover:text-primary transition-transform active:scale-90 p-2" href="#">
+<span class="material-symbols-outlined mb-1">list_alt</span>
+<span class="font-label-sm text-label-sm">Queue</span>
+</a>
+<a class="flex flex-col items-center justify-center text-on-surface-variant hover:text-primary transition-transform active:scale-90 p-2" href="#">
+<span class="material-symbols-outlined mb-1">add_box</span>
+<span class="font-label-sm text-label-sm">Add</span>
+</a>
+<a class="flex flex-col items-center justify-center text-primary font-bold transition-transform active:scale-90 p-2 border-t-2 border-primary-container -mt-[2px]" href="#">
+<span class="material-symbols-outlined mb-1" style="font-variation-settings: 'FILL' 1;">person</span>
+<span class="font-label-sm text-label-sm">Account</span>
+</a>
+</nav>
+
+
+</body></html>

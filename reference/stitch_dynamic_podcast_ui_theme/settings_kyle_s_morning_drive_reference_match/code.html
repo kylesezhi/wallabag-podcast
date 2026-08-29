@@ -1,0 +1,250 @@
+<!DOCTYPE html><html class="dark" lang="en" style=""><head>
+<meta charset="utf-8">
+<meta content="width=device-width, initial-scale=1.0" name="viewport">
+<title>Settings - Kyle's Morning Drive</title>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;700&amp;family=JetBrains+Mono:wght@400;500;700&amp;display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet">
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<script id="tailwind-config">
+        tailwind.config = {
+          darkMode: "class",
+          theme: {
+            extend: {
+              "colors": {
+                      "secondary-fixed-dim": "#d0bcff",
+                      "surface-tint": "#ffb869",
+                      "surface-container-highest": "#323536",
+                      "inverse-on-surface": "#2e3132",
+                      "on-tertiary-container": "#42464d",
+                      "surface-variant": "#323536",
+                      "on-background": "#e1e3e4",
+                      "error-container": "#93000a",
+                      "surface-container-low": "#191c1d",
+                      "surface-container-high": "#282a2b",
+                      "on-tertiary-fixed-variant": "#43474e",
+                      "secondary-fixed": "#e9ddff",
+                      "on-secondary-fixed-variant": "#522aa7",
+                      "on-secondary-container": "#c3abff",
+                      "primary-fixed": "#ffdcbb",
+                      "on-secondary-fixed": "#23005c",
+                      "tertiary-fixed-dim": "#c3c6cf",
+                      "secondary-container": "#552daa",
+                      "surface-dim": "#111415",
+                      "on-tertiary-fixed": "#181c22",
+                      "on-primary-fixed": "#2c1700",
+                      "primary-container": "#ff9d00",
+                      "surface": "#111415",
+                      "tertiary-container": "#b1b4bc",
+                      "on-primary-container": "#663c00",
+                      "surface-container": "#1d2021",
+                      "error": "#ffb4ab",
+                      "on-primary": "#482900",
+                      "background": "#111415",
+                      "on-error-container": "#ffdad6",
+                      "secondary": "#d0bcff",
+                      "outline": "#a28d79",
+                      "inverse-surface": "#e1e3e4",
+                      "tertiary-fixed": "#dfe2eb",
+                      "surface-container-lowest": "#0c0f10",
+                      "on-surface": "#e1e3e4",
+                      "on-tertiary": "#2d3137",
+                      "primary": "#ffc485",
+                      "on-secondary": "#3b0191",
+                      "on-error": "#690005",
+                      "on-primary-fixed-variant": "#673d00",
+                      "surface-bright": "#373a3b",
+                      "on-surface-variant": "#dac2ad",
+                      "primary-fixed-dim": "#ffb869",
+                      "tertiary": "#cccfd8",
+                      "outline-variant": "#544433",
+                      "inverse-primary": "#885200"
+              },
+              "borderRadius": {
+                      "DEFAULT": "0.25rem",
+                      "lg": "0.5rem",
+                      "xl": "0.75rem",
+                      "full": "9999px"
+              },
+              "spacing": {
+                      "margin-desktop": "40px",
+                      "stack-md": "12px",
+                      "margin-mobile": "20px",
+                      "gutter": "16px",
+                      "stack-lg": "24px",
+                      "stack-sm": "4px",
+                      "base": "8px"
+              },
+              "fontFamily": {
+                      "headline-lg": [
+                              "Space Grotesk"
+                      ],
+                      "headline-xl": [
+                              "Space Grotesk"
+                      ],
+                      "headline-lg-mobile": [
+                              "Space Grotesk"
+                      ],
+                      "body-md": [
+                              "JetBrains Mono"
+                      ],
+                      "label-sm": [
+                              "JetBrains Mono"
+                      ]
+              },
+              "fontSize": {
+                      "headline-lg": [
+                              "32px",
+                              {
+                                      "lineHeight": "40px",
+                                      "fontWeight": "700"
+                              }
+                      ],
+                      "headline-xl": [
+                              "48px",
+                              {
+                                      "lineHeight": "56px",
+                                      "letterSpacing": "-0.02em",
+                                      "fontWeight": "700"
+                              }
+                      ],
+                      "headline-lg-mobile": [
+                              "24px",
+                              {
+                                      "lineHeight": "32px",
+                                      "fontWeight": "700"
+                              }
+                      ],
+                      "body-md": [
+                              "16px",
+                              {
+                                      "lineHeight": "24px",
+                                      "fontWeight": "400"
+                              }
+                      ],
+                      "label-sm": [
+                              "12px",
+                              {
+                                      "lineHeight": "16px",
+                                      "fontWeight": "500"
+                              }
+                      ]
+              }
+            },
+          },
+        }
+      </script>
+<style>
+        .retro-border {
+            border: 2px solid theme('colors.secondary-fixed-dim');
+        }
+        .retro-shadow {
+            box-shadow: 4px 4px 0px 0px theme('colors.secondary-container');
+        }
+        .retro-shadow-hover:active {
+            transform: translate(2px, 2px);
+            box-shadow: 2px 2px 0px 0px theme('colors.secondary-container');
+        }
+        
+        input[type=range]::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            height: 20px;
+            width: 20px;
+            border-radius: 50%;
+            background: theme('colors.primary-container');
+            cursor: pointer;
+            border: 2px solid theme('colors.surface');
+        }
+      </style>
+</head>
+<body class="bg-background text-on-background min-h-screen font-body-md text-body-md md:pb-0 pt-16">
+<!-- TopAppBar -->
+<header class="bg-surface dark:bg-surface w-full top-0 sticky border-b-2 border-surface-variant dark:border-surface-variant flex items-center justify-between px-margin-mobile h-16 z-50">
+<button class="text-primary dark:text-primary hover:bg-surface-variant dark:hover:bg-surface-variant active:translate-x-0.5 active:translate-y-0.5 transition-transform p-2 rounded-full">
+<span class="material-symbols-outlined">arrow_back</span>
+</button>
+<h1 class="font-headline-lg-mobile text-headline-lg-mobile text-primary dark:text-primary">Settings</h1>
+<button class="text-primary dark:text-primary hover:bg-surface-variant dark:hover:bg-surface-variant active:translate-x-0.5 active:translate-y-0.5 transition-transform p-2 rounded-full">
+<span class="material-symbols-outlined">settings</span>
+</button>
+</header>
+<main class="p-margin-mobile max-w-xl mx-auto space-y-stack-lg">
+<!-- Section 1: Wallabag Connection -->
+<section class="bg-surface-container retro-border rounded-xl p-6">
+<h2 class="font-headline-lg-mobile text-headline-lg-mobile text-primary mb-stack-md">Wallabag Connection</h2>
+<div class="space-y-stack-md">
+<div class="flex items-center gap-gutter">
+<span class="text-on-surface-variant">Status:</span>
+<span class="bg-secondary-container text-on-secondary-container font-label-sm text-label-sm px-2 py-1 rounded retro-border">CONNECTED</span>
+</div>
+<div class="flex flex-col gap-stack-sm">
+<span class="font-bold text-primary">URL</span>
+<span class="text-on-surface break-all bg-surface-variant p-2 rounded font-body-md text-body-md">http://192.168.42.223:8000/</span>
+</div>
+<p class="text-on-surface-variant font-label-sm text-label-sm border-l-2 border-primary-container pl-2">
+                    Credentials live only in your .env file and are never shown here.
+                </p>
+<button class="bg-primary-container text-on-primary-container font-bold py-2 px-4 rounded retro-shadow retro-shadow-hover w-full sm:w-auto mt-stack-md transition-all" style="background-color: rgb(255, 157, 0);">
+                    Test Connection
+                </button>
+</div>
+</section>
+<!-- Section 2: Generation Settings -->
+<section class="bg-surface-container retro-border rounded-xl p-6">
+<h2 class="font-headline-lg-mobile text-headline-lg-mobile text-primary mb-stack-md">Generation Settings</h2>
+<div class="space-y-stack-lg">
+<div class="space-y-stack-md"><div class="flex justify-between items-center">
+<label class="font-bold text-primary block">Articles per drive</label>
+<span class="font-headline-lg-mobile text-headline-lg-mobile text-primary-container" id="sliderValue" style="color: rgb(255, 157, 0);">10</span>
+</div>
+<input class="w-full h-2 bg-surface-variant rounded-lg appearance-none cursor-pointer accent-primary-container" max="50" min="1" oninput="document.getElementById('sliderValue').innerText = this.value" type="range" value="10" style="accent-color: rgb(255, 157, 0);"></div>
+<div class="space-y-stack-md">
+<label class="font-bold text-primary block">Voice</label>
+<div class="relative">
+<select class="w-full bg-surface-variant text-on-surface border-2 border-secondary-fixed-dim rounded-lg p-3 appearance-none font-body-md text-body-md focus:outline-none focus:border-primary-container">
+<option>bm_daniel</option>
+<option>bm_fable</option>
+<option>bm_onyx</option>
+</select>
+<span class="material-symbols-outlined absolute right-3 top-3 text-on-surface-variant pointer-events-none">expand_more</span>
+</div>
+</div>
+</div>
+</section>
+<!-- Section 3: Podcast Settings -->
+<section class="bg-surface-container retro-border rounded-xl p-6">
+<h2 class="font-headline-lg-mobile text-headline-lg-mobile text-primary mb-stack-md">Podcast Settings</h2>
+<div class="space-y-stack-md">
+<div class="grid grid-cols-1 sm:grid-cols-[100px_1fr] gap-x-gutter gap-y-stack-sm items-baseline">
+<span class="font-bold text-primary">Feed title</span>
+<span class="text-on-surface">Kyle's Morning Drive</span>
+<span class="font-bold text-primary mt-stack-sm sm:mt-0">Feed URL</span>
+<span class="text-on-surface break-all bg-surface-variant p-2 rounded font-body-md text-body-md">http://192.168.42.167:8000/feed.xml</span>
+</div>
+<p class="text-on-surface-variant font-label-sm text-label-sm border-l-2 border-primary-container pl-2 mt-stack-md">
+                    Change these via FEED_TITLE and BASE_URL in .env.
+                </p>
+</div>
+</section>
+<!-- Section 4: Automation -->
+<section class="bg-surface-container retro-border rounded-xl p-6">
+<h2 class="font-headline-lg-mobile text-headline-lg-mobile text-primary mb-stack-md">Automation</h2>
+<div class="flex items-center justify-between">
+<div>
+<span class="font-bold text-primary block">Nightly Build</span>
+<span class="text-on-surface-variant font-label-sm text-label-sm">Automatically generate episodes</span>
+</div>
+<label class="relative inline-flex items-center cursor-pointer">
+<input checked="" class="sr-only peer" type="checkbox" value="">
+<div class="w-11 h-6 bg-surface-variant peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-primary-container border-2 border-secondary-fixed-dim peer-checked:bg-[#ff9d00]"></div>
+</label>
+</div>
+</section>
+</main>
+<!-- BottomNavBar (Visible only on mobile) -->
+
+<!-- SideNav (Visible only on desktop, hidden for this specific transactional screen view per rules, but included for structure if needed, currently hiding to prioritize canvas) -->
+<nav class="hidden">
+<!-- Navigation Drawer Content -->
+</nav>
+</body></html>

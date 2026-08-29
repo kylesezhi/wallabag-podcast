@@ -1,0 +1,261 @@
+<!DOCTYPE html>
+
+<html class="dark" lang="en" style=""><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>Kyle's Morning Drive - Dashboard</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&amp;family=Space+Grotesk:wght@400;700&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    colors: {
+                        "tertiary-fixed": "#dfe2eb",
+                        "on-primary": "#482900",
+                        "primary-fixed-dim": "#ffb869",
+                        "surface-container": "#1d2021",
+                        "on-primary-container": "#663c00",
+                        "surface-dim": "#111415",
+                        "surface-container-highest": "#323536",
+                        "on-error": "#690005",
+                        "surface-tint": "#ffb869",
+                        "on-tertiary": "#2d3137",
+                        "on-surface": "#e1e3e4",
+                        "secondary-container": "#552daa",
+                        "on-secondary-container": "#c3abff",
+                        "tertiary": "#cccfd8",
+                        "surface-variant": "#323536",
+                        "surface": "#111415",
+                        "on-surface-variant": "#dac2ad",
+                        "secondary-fixed-dim": "#d0bcff",
+                        "secondary-fixed": "#e9ddff",
+                        "error": "#ffb4ab",
+                        "surface-container-lowest": "#0c0f10",
+                        "primary": "#ffc485",
+                        "error-container": "#93000a",
+                        "on-error-container": "#ffdad6",
+                        "background": "#111415",
+                        "on-tertiary-fixed-variant": "#43474e",
+                        "outline": "#a28d79",
+                        "outline-variant": "#544433",
+                        "primary-fixed": "#ffdcbb",
+                        "surface-bright": "#373a3b",
+                        "on-secondary": "#3b0191",
+                        "on-secondary-fixed": "#23005c",
+                        "inverse-on-surface": "#2e3132",
+                        "on-secondary-fixed-variant": "#522aa7",
+                        "on-primary-fixed": "#2c1700",
+                        "on-tertiary-fixed": "#181c22",
+                        "inverse-primary": "#885200",
+                        "surface-container-high": "#282a2b",
+                        "tertiary-container": "#b1b4bc",
+                        "tertiary-fixed-dim": "#c3c6cf",
+                        "on-primary-fixed-variant": "#673d00",
+                        "on-background": "#e1e3e4",
+                        "secondary": "#d0bcff",
+                        "primary-container": "#ff9d00",
+                        "on-tertiary-container": "#42464d",
+                        "surface-container-low": "#191c1d",
+                        "inverse-surface": "#e1e3e4"
+                    },
+                    borderRadius: {
+                        "DEFAULT": "0.25rem",
+                        "lg": "0.5rem",
+                        "xl": "0.75rem",
+                        "full": "9999px"
+                    },
+                    spacing: {
+                        "margin-mobile": "20px",
+                        "margin-desktop": "40px",
+                        "gutter": "16px",
+                        "base": "8px",
+                        "stack-sm": "4px",
+                        "stack-md": "12px",
+                        "stack-lg": "24px"
+                    },
+                    fontFamily: {
+                        "headline-lg-mobile": ["Space Grotesk"],
+                        "label-sm": ["JetBrains Mono"],
+                        "headline-lg": ["Space Grotesk"],
+                        "headline-xl": ["Space Grotesk"],
+                        "body-md": ["JetBrains Mono"]
+                    },
+                    fontSize: {
+                        "headline-lg-mobile": ["24px", { lineHeight: "32px", fontWeight: "700" }],
+                        "label-sm": ["12px", { lineHeight: "16px", fontWeight: "500" }],
+                        "headline-lg": ["32px", { lineHeight: "40px", fontWeight: "700" }],
+                        "headline-xl": ["48px", { lineHeight: "56px", letterSpacing: "-0.02em", fontWeight: "700" }],
+                        "body-md": ["16px", { lineHeight: "24px", fontWeight: "400" }]
+                    }
+                }
+            }
+        }
+    </script>
+<style>
+        /* Retro-Brutalist Pattern Utilities */
+        .bg-dither {
+            background-image: radial-gradient(var(--tw-colors-outline-variant) 1px, transparent 0);
+            background-size: 4px 4px;
+        }
+        
+        /* Brutalist Button Interaction Styles */
+        .btn-brutal {
+            transition: transform 0.1s ease-out, box-shadow 0.1s ease-out;
+        }
+        .btn-brutal:hover {
+            transform: translate(2px, 2px);
+        }
+        .btn-brutal:active {
+            transform: translate(4px, 4px);
+        }
+        
+        .btn-primary-brutal {
+            box-shadow: 4px 4px 0px 0px theme('colors.secondary-container');
+        }
+        .btn-primary-brutal:hover {
+            box-shadow: 2px 2px 0px 0px theme('colors.secondary-container');
+        }
+        .btn-primary-brutal:active {
+            box-shadow: 0px 0px 0px 0px theme('colors.secondary-container');
+        }
+
+        .btn-secondary-brutal {
+            box-shadow: 4px 4px 0px 0px theme('colors.surface-container-highest');
+        }
+        .btn-secondary-brutal:hover {
+            box-shadow: 2px 2px 0px 0px theme('colors.surface-container-highest');
+        }
+        .btn-secondary-brutal:active {
+            box-shadow: 0px 0px 0px 0px theme('colors.surface-container-highest');
+        }
+        
+        /* Flashing Terminal Cursor for Input */
+        .terminal-input:focus {
+            caret-color: transparent;
+            background-image: linear-gradient(theme('colors.primary'), theme('colors.primary'));
+            background-size: 8px 16px;
+            background-repeat: no-repeat;
+            background-position: calc(100% - 10px) center;
+            animation: blink 1s step-end infinite;
+        }
+        @keyframes blink { 50% { background-image: none; } }
+    </style>
+</head>
+<body class="bg-background text-on-background font-body-md min-h-screen pb-[80px] md:pb-0 antialiased selection:bg-primary selection:text-on-primary">
+<!-- TopAppBar -->
+<header class="w-full border-b-2 border-outline-variant flex justify-between items-center px-margin-mobile md:px-margin-desktop py-4 bg-background dark:bg-background z-40 sticky top-0">
+<div class="font-headline-lg-mobile text-headline-lg-mobile md:font-headline-lg md:text-headline-lg text-primary dark:text-primary uppercase tracking-tighter flex items-center gap-2"><span aria-hidden="true" class="material-symbols-outlined text-[28px] text-primary-container">local_cafe</span>
+<span class="text-primary-container">Kyle's Morning Drive</span></div>
+<div class="flex gap-4 items-center">
+<span aria-label="settings" class="material-symbols-outlined dark:text-primary hover:text-primary-container transition-colors cursor-pointer active:translate-y-0.5 text-primary-container">settings</span>
+</div>
+</header>
+<!-- Main Content Canvas -->
+<main class="w-full max-w-[1200px] mx-auto p-margin-mobile md:p-margin-desktop flex flex-col gap-stack-lg">
+<!-- Hero Card: Today's Drive -->
+<section class="relative w-full bg-surface-container border-2 border-outline-variant p-stack-lg overflow-hidden group"><!-- Decorative Dithered Background Layer -->
+<div class="absolute inset-0 bg-dither opacity-20 pointer-events-none"></div>
+<!-- Background Accent -->
+<div class="absolute top-0 right-0 w-32 h-32 bg-primary-container/10 -mr-16 -mt-16 rotate-45 pointer-events-none"></div>
+<div class="relative z-10 flex flex-col gap-stack-lg">
+<!-- Top: Title and Status -->
+<div class="flex flex-col gap-1">
+<h2 class="font-headline-xl text-headline-xl text-on-surface m-0 tracking-tighter">Today's Drive</h2>
+<div class="flex items-center gap-2 text-primary-container">
+<span class="material-symbols-outlined text-[18px] animate-pulse">radio_button_checked</span>
+<p class="font-label-sm uppercase tracking-widest">Ready to listen</p>
+</div>
+</div>
+<!-- Middle: Stats with Vertical Hierarchy -->
+<div class="flex flex-col gap-stack-md py-stack-md border-y-2 border-outline-variant">
+<div class="flex flex-col">
+<span class="text-primary text-headline-lg leading-none">7h 7m</span>
+<span class="text-on-surface-variant text-[10px] uppercase font-bold tracking-tighter">Total Duration</span>
+</div>
+<div class="flex flex-col">
+<span class="text-primary text-headline-lg leading-none">17</span>
+<span class="text-on-surface-variant text-[10px] uppercase font-bold tracking-tighter">Articles</span>
+</div>
+</div>
+<!-- Bottom: Actions -->
+<div class="flex flex-col gap-stack-md">
+<button class="btn-brutal btn-primary-brutal bg-primary-container text-on-primary border-2 border-on-primary px-6 py-3 font-bold text-[18px] flex items-center justify-center gap-2 uppercase tracking-wide w-full">
+<span class="material-symbols-outlined" style="font-variation-settings: 'FILL' 1;">play_arrow</span>
+            Generate Audio
+        </button>
+<button class="btn-brutal btn-secondary-brutal bg-transparent border-2 border-outline-variant text-on-surface px-6 py-2 font-bold text-label-sm flex items-center justify-center gap-2 uppercase tracking-wide w-full hover:bg-surface-variant">
+            + 10 Random Articles
+        </button>
+</div>
+</div></section>
+<!-- Queue Section -->
+<section class="flex flex-col gap-stack-md">
+<header class="flex justify-between items-end border-b-2 border-outline-variant pb-2">
+<h3 class="font-headline-lg-mobile text-headline-lg-mobile text-on-surface">Queue</h3>
+<button class="text-on-surface-variant hover:text-error text-label-sm font-label-sm uppercase flex items-center gap-1 transition-colors">
+<span class="material-symbols-outlined text-[16px]">clear_all</span>
+                    Clear Staged
+                </button>
+</header>
+<!-- Filters -->
+<div class="flex flex-col gap-stack-sm">
+<div class="relative">
+<span class="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-on-surface-variant">search</span>
+<input class="terminal-input w-full bg-surface-dim border-2 border-outline-variant pl-10 pr-4 py-3 text-on-surface text-body-md font-body-md focus:outline-none focus:border-primary placeholder:text-on-surface-variant transition-colors rounded-none" placeholder="Filter queue..." type="text"/>
+</div>
+<div class="flex gap-2 overflow-x-auto pb-2 scrollbar-hide snap-x">
+<button class="snap-start shrink-0 px-3 py-1 border-2 border-outline-variant bg-surface text-on-surface hover:bg-surface-variant text-label-sm font-label-sm uppercase transition-colors">Staged</button>
+<button class="snap-start shrink-0 px-3 py-1 border-2 border-outline-variant bg-surface text-on-surface hover:bg-surface-variant text-label-sm font-label-sm uppercase transition-colors">Generating</button>
+<button class="snap-start shrink-0 px-3 py-1 border-2 border-primary-container bg-primary-container text-on-primary text-label-sm font-label-sm uppercase transition-colors">Done</button>
+<button class="snap-start shrink-0 px-3 py-1 border-2 border-outline-variant bg-surface text-on-surface hover:bg-surface-variant text-label-sm font-label-sm uppercase transition-colors">Failed</button>
+</div>
+</div>
+<!-- Queue List -->
+<div class="flex flex-col border-t-2 border-outline-variant">
+<!-- Item 1 -->
+<article class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-stack-sm p-stack-md border-b-2 border-outline-variant hover:bg-surface-container-highest transition-colors group">
+<div class="flex flex-col gap-1 max-w-[80%]">
+<h4 class="font-headline-lg-mobile text-[18px] leading-tight text-on-surface line-clamp-2 group-hover:text-primary transition-colors">He couldn't get over his fiancee's death. So he brought her back as an A.I. chatbot</h4>
+<div class="flex flex-wrap items-center gap-3 text-on-surface-variant font-label-sm text-label-sm">
+<span class="flex items-center gap-1"><span class="material-symbols-outlined text-[14px]">link</span> sfchronicle.com</span>
+<span class="flex items-center gap-1"><span class="material-symbols-outlined text-[14px]">schedule</span> 53 minutes</span>
+<span class="border border-primary-container text-primary-container px-1.5 py-0.5 text-[10px] uppercase tracking-wider">Done</span>
+</div>
+</div>
+<div class="flex items-center gap-2 mt-2 sm:mt-0 opacity-100 sm:opacity-50 group-hover:opacity-100 transition-opacity">
+<button aria-label="Delete" class="p-2 text-on-surface-variant hover:text-error hover:bg-surface-variant transition-colors">
+<span class="material-symbols-outlined">delete</span>
+</button>
+<button aria-label="Archive" class="p-2 text-on-surface-variant hover:text-primary hover:bg-surface-variant transition-colors">
+<span class="material-symbols-outlined">inventory_2</span>
+</button>
+</div>
+</article>
+<!-- Item 2 -->
+<article class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-stack-sm p-stack-md border-b-2 border-outline-variant hover:bg-surface-container-highest transition-colors group">
+<div class="flex flex-col gap-1 max-w-[80%]">
+<h4 class="font-headline-lg-mobile text-[18px] leading-tight text-on-surface line-clamp-2 group-hover:text-primary transition-colors">Pnin Gives a Party</h4>
+<div class="flex flex-wrap items-center gap-3 text-on-surface-variant font-label-sm text-label-sm">
+<span class="flex items-center gap-1"><span class="material-symbols-outlined text-[14px]">link</span> newyorker.com</span>
+<span class="flex items-center gap-1"><span class="material-symbols-outlined text-[14px]">schedule</span> 38 minutes</span>
+<span class="border border-primary-container text-primary-container px-1.5 py-0.5 text-[10px] uppercase tracking-wider">Done</span>
+</div>
+</div>
+<div class="flex items-center gap-2 mt-2 sm:mt-0 opacity-100 sm:opacity-50 group-hover:opacity-100 transition-opacity">
+<button aria-label="Delete" class="p-2 text-on-surface-variant hover:text-error hover:bg-surface-variant transition-colors">
+<span class="material-symbols-outlined">delete</span>
+</button>
+<button aria-label="Archive" class="p-2 text-on-surface-variant hover:text-primary hover:bg-surface-variant transition-colors">
+<span class="material-symbols-outlined">inventory_2</span>
+</button>
+</div>
+</article>
+</div>
+</section>
+</main>
+<!-- BottomNavBar -->
+</body></html>

@@ -1,0 +1,292 @@
+<!DOCTYPE html><html class="dark" lang="en" style=""><head>
+<meta charset="utf-8">
+<meta content="width=device-width, initial-scale=1.0" name="viewport">
+<title>Kyle's Morning Drive - Dashboard</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&amp;family=Space+Grotesk:wght@400;500;700&amp;display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet">
+<script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    colors: {
+                        "on-surface": "#e1e3e4",
+                        "tertiary-fixed": "#dfe2eb",
+                        "on-secondary-fixed": "#23005c",
+                        "surface": "#111415",
+                        "primary-container": "#ff9d00",
+                        "tertiary": "#cccfd8",
+                        "primary-fixed": "#ffdcbb",
+                        "outline-variant": "#544433",
+                        "on-primary-fixed-variant": "#673d00",
+                        "surface-container-high": "#282a2b",
+                        "on-tertiary": "#2d3137",
+                        "surface-bright": "#373a3b",
+                        "surface-variant": "#323536",
+                        "on-tertiary-container": "#42464d",
+                        "inverse-on-surface": "#2e3132",
+                        "inverse-surface": "#e1e3e4",
+                        "tertiary-fixed-dim": "#c3c6cf",
+                        "primary": "#ffc485",
+                        "on-primary-fixed": "#2c1700",
+                        "background": "#111415",
+                        "on-background": "#e1e3e4",
+                        "on-secondary-fixed-variant": "#522aa7",
+                        "inverse-primary": "#885200",
+                        "on-surface-variant": "#dac2ad",
+                        "secondary-fixed": "#e9ddff",
+                        "tertiary-container": "#b1b4bc",
+                        "surface-container-low": "#191c1d",
+                        "primary-fixed-dim": "#ffb869",
+                        "on-error-container": "#ffdad6",
+                        "error": "#ffb4ab",
+                        "on-tertiary-fixed": "#181c22",
+                        "on-error": "#690005",
+                        "surface-tint": "#ffb869",
+                        "secondary-container": "#552daa",
+                        "secondary-fixed-dim": "#d0bcff",
+                        "on-tertiary-fixed-variant": "#43474e",
+                        "on-primary": "#482900",
+                        "error-container": "#93000a",
+                        "surface-container": "#1d2021",
+                        "surface-dim": "#111415",
+                        "surface-container-highest": "#323536",
+                        "on-primary-container": "#663c00",
+                        "outline": "#a28d79",
+                        "secondary": "#d0bcff",
+                        "on-secondary-container": "#c3abff",
+                        "on-secondary": "#3b0191",
+                        "surface-container-lowest": "#0c0f10"
+                    },
+                    borderRadius: {
+                        "DEFAULT": "0px",
+                        "lg": "0px",
+                        "xl": "0px",
+                        "full": "0px"
+                    },
+                    spacing: {
+                        "base": "8px",
+                        "stack-md": "12px",
+                        "gutter": "16px",
+                        "margin-mobile": "20px",
+                        "stack-sm": "4px",
+                        "margin-desktop": "40px",
+                        "stack-lg": "24px"
+                    },
+                    fontFamily: {
+                        "label-sm": ["JetBrains Mono"],
+                        "body-md": ["JetBrains Mono"],
+                        "headline-xl": ["Space Grotesk"],
+                        "headline-lg-mobile": ["Space Grotesk"],
+                        "headline-lg": ["Space Grotesk"]
+                    },
+                    fontSize: {
+                        "label-sm": ["12px", { lineHeight: "16px", fontWeight: "500" }],
+                        "body-md": ["16px", { lineHeight: "24px", fontWeight: "400" }],
+                        "headline-xl": ["48px", { lineHeight: "56px", letterSpacing: "-0.02em", fontWeight: "700" }],
+                        "headline-lg-mobile": ["24px", { lineHeight: "32px", fontWeight: "700" }],
+                        "headline-lg": ["32px", { lineHeight: "40px", fontWeight: "700" }]
+                    }
+                }
+            }
+        }
+    </script>
+<style>
+        .pixel-border {
+            border: 2px solid theme('colors.secondary-container');
+        }
+        .pixel-btn-primary {
+            background-color: theme('colors.primary-container');
+            color: theme('colors.surface');
+            border: 2px solid theme('colors.primary-container');
+            box-shadow: 4px 4px 0px theme('colors.secondary-container');
+            transition: all 0.1s;
+        }
+        .pixel-btn-primary:active {
+            transform: translate(2px, 2px);
+            box-shadow: 2px 2px 0px theme('colors.secondary-container');
+        }
+        
+        .pixel-btn-secondary {
+            background-color: theme('colors.surface-container');
+            color: theme('colors.on-surface');
+            border: 2px solid theme('colors.secondary-container');
+            box-shadow: 4px 4px 0px theme('colors.secondary-container');
+            transition: all 0.1s;
+        }
+        .pixel-btn-secondary:active {
+            transform: translate(2px, 2px);
+            box-shadow: 2px 2px 0px theme('colors.secondary-container');
+        }
+
+        .pixel-input {
+            background-color: theme('colors.surface-container-low');
+            color: theme('colors.primary');
+            border: 2px solid theme('colors.secondary-container');
+        }
+        .pixel-input:focus {
+            outline: none;
+            border-color: theme('colors.primary-container');
+        }
+        
+        .dither-bg {
+            background-image: radial-gradient(theme('colors.secondary-container') 1px, transparent 1px);
+            background-size: 4px 4px;
+        }
+    </style>
+</head>
+<body class="bg-background text-on-surface font-body-md h-screen flex overflow-hidden">
+<!-- Side Navigation -->
+<!-- Main Content Canvas -->
+<main class="flex-1 overflow-y-auto bg-background relative dither-bg">
+<!-- Top App Bar (Mobile) -->
+<header class="flex justify-between items-center px-margin-mobile py-4 bg-background dark:bg-background text-primary dark:text-primary w-full border-b-2 border-outline-variant sticky top-0 z-20">
+<div class="font-headline-lg-mobile text-headline-lg-mobile text-primary uppercase tracking-tighter flex items-center gap-2">
+<span class="material-symbols-outlined" style="font-variation-settings: 'FILL' 1;">coffee</span>
+                Kyle's Morning Drive
+            </div>
+<div class="flex items-center gap-stack-md">
+<span class="material-symbols-outlined cursor-pointer hover:text-primary-container transition-colors">settings</span>
+</div>
+</header>
+<div class="max-w-[1200px] mx-auto p-margin-mobile md:p-margin-desktop grid grid-cols-1 lg:grid-cols-12 gap-stack-lg relative z-10">
+<!-- Hero Dashboard Area -->
+<div class="lg:col-span-8 flex flex-col gap-stack-lg">
+<div class="relative overflow-hidden bg-surface-container pixel-border p-stack-lg flex flex-col md:flex-row items-center gap-stack-lg">
+<!-- Background Accent -->
+<div class="absolute top-0 right-0 w-32 h-32 bg-primary-container/10 -mr-16 -mt-16 rotate-45 pointer-events-none"></div>
+<!-- Left: Title and Status -->
+<div class="flex-1 text-center md:text-left z-10">
+<h1 class="font-headline-xl text-headline-xl text-on-surface mb-1 tracking-tighter">Today's Drive</h1>
+<div class="flex items-center justify-center md:justify-start gap-2 text-primary-container">
+<span class="material-symbols-outlined text-sm animate-pulse">radio_button_checked</span>
+<p class="font-label-sm uppercase tracking-widest">Ready to listen</p>
+</div>
+</div>
+<!-- Center: Stats -->
+<div class="flex flex-col items-center md:items-end gap-1 px-stack-lg border-y-2 md:border-y-0 md:border-x-2 border-secondary-container py-stack-md md:py-0 z-10">
+<div class="flex flex-col items-center md:items-end">
+<span class="text-primary font-headline-lg leading-none">7h 7m</span>
+<span class="text-on-surface-variant text-xs uppercase font-bold tracking-tighter">Total Duration</span>
+</div>
+<div class="flex flex-col items-center md:items-end mt-2">
+<span class="text-primary font-headline-lg leading-none">17</span>
+<span class="text-on-surface-variant text-xs uppercase font-bold tracking-tighter">Articles</span>
+</div>
+</div>
+<!-- Right: Actions -->
+<div class="flex flex-col w-full md:w-auto gap-stack-md z-10">
+<button class="pixel-btn-primary px-8 py-3 font-bold text-lg whitespace-nowrap flex items-center justify-center gap-2">
+<span class="material-symbols-outlined">play_arrow</span>
+            Generate Audio
+        </button>
+<button class="pixel-btn-secondary px-8 py-2 font-bold text-sm whitespace-nowrap">
+            + 10 Random Articles
+        </button>
+</div>
+</div>
+<!-- Queue Section -->
+<div>
+<div class="flex items-center justify-between mb-stack-md">
+<h2 class="font-headline-lg-mobile text-headline-lg-mobile">Queue</h2>
+<button class="pixel-btn-secondary px-4 py-2 text-sm">Archive and Delete All</button>
+</div>
+<div class="flex flex-wrap items-center gap-stack-md mb-stack-lg">
+<input class="pixel-input flex-1 min-w-[200px] py-2 px-3 font-label-sm" placeholder="Filter by title..." type="text">
+<div class="flex gap-2">
+<button class="px-3 py-1 border-2 border-outline text-label-sm text-outline hover:border-primary hover:text-primary transition-colors">STAGED</button>
+<button class="px-3 py-1 border-2 border-primary-container text-label-sm text-primary-container bg-primary-container/10">GENERATING</button>
+<button class="px-3 py-1 border-2 border-outline text-label-sm text-outline hover:border-primary hover:text-primary transition-colors">DONE</button>
+<button class="px-3 py-1 border-2 border-outline text-label-sm text-outline hover:border-primary hover:text-primary transition-colors">FAILED</button>
+</div>
+</div>
+<div class="flex flex-col gap-stack-md">
+<!-- Queue Item 1 -->
+<div class="bg-surface-container pixel-border p-stack-md hover:bg-surface-container-highest transition-colors group">
+<div class="flex flex-col md:flex-row justify-between gap-stack-md">
+<div class="flex-1">
+<h3 class="font-bold text-lg text-primary mb-2 line-clamp-2">He couldn't get over his fiancee's death. So he brought her back as an A.I. chatbot</h3>
+<div class="flex items-center gap-4 text-on-surface-variant text-sm font-label-sm">
+<span class="">www.sfchronicle.com</span>
+<span class="flex items-center gap-1"><span class="material-symbols-outlined text-sm">schedule</span> 53 minutes</span>
+</div>
+<div class="mt-2 inline-block px-2 py-1 bg-surface-bright text-xs font-bold text-on-surface border border-outline">DONE</div>
+</div>
+<div class="flex items-start gap-2 opacity-100 md:opacity-0 group-hover:opacity-100 transition-opacity">
+<button class="pixel-btn-secondary px-3 py-1 text-sm text-error border-error shadow-none hover:bg-error/10">Delete</button>
+<button class="pixel-btn-secondary px-3 py-1 text-sm shadow-none">Archive</button>
+</div>
+</div>
+</div>
+<!-- Queue Item 2 -->
+<div class="bg-surface-container pixel-border p-stack-md hover:bg-surface-container-highest transition-colors group">
+<div class="flex flex-col md:flex-row justify-between gap-stack-md">
+<div class="flex-1">
+<h3 class="font-bold text-lg text-primary mb-2 line-clamp-2">"Pnin Gives a Party"</h3>
+<div class="flex items-center gap-4 text-on-surface-variant text-sm font-label-sm">
+<span class="">www.newyorker.com</span>
+<span class="flex items-center gap-1"><span class="material-symbols-outlined text-sm">schedule</span> 38 minutes</span>
+</div>
+<div class="mt-2 inline-block px-2 py-1 bg-primary-container/20 text-xs font-bold text-primary-container border border-primary-container">GENERATING</div>
+</div>
+<div class="flex items-start gap-2 opacity-100 md:opacity-0 group-hover:opacity-100 transition-opacity">
+<button class="pixel-btn-secondary px-3 py-1 text-sm text-error border-error shadow-none hover:bg-error/10">Delete</button>
+<button class="pixel-btn-secondary px-3 py-1 text-sm shadow-none">Archive</button>
+</div>
+</div>
+</div>
+</div>
+</div>
+</div>
+<!-- Side Info Area -->
+<div class="lg:col-span-4 flex flex-col gap-stack-lg">
+<div class="bg-surface-container pixel-border p-stack-md">
+<h2 class="font-headline-lg-mobile text-headline-lg-mobile mb-stack-md border-b-2 border-secondary-container pb-2">Podcast Info</h2>
+<div class="flex flex-col gap-stack-md font-label-sm">
+<div class="flex justify-between items-start border-b border-surface-variant pb-2">
+<span class="text-on-surface-variant w-24">Feed</span>
+<a class="text-primary hover:underline text-right break-all" href="#">Kyle's Morning Drive</a>
+</div>
+<div class="flex justify-between items-start border-b border-surface-variant pb-2">
+<span class="text-on-surface-variant w-24">Subscribe URL</span>
+<div class="flex items-start gap-2 justify-end">
+<span class="text-primary text-right break-all max-w-[150px]">http://192.168.42.167:8000/feed.xml</span>
+<button class="text-on-surface-variant hover:text-primary"><span class="material-symbols-outlined text-sm">content_copy</span></button>
+</div>
+</div>
+</div>
+<p class="text-on-surface-variant text-sm mt-stack-md border-t-2 border-secondary-container pt-stack-md">
+                        Add this URL to your podcast app. Set BASE_URL to your LAN address to listen from your phone.
+                    </p>
+</div>
+<div class="bg-surface-container pixel-border p-stack-md flex justify-center items-center h-48 relative overflow-hidden">
+<div class="absolute inset-0 opacity-20 dither-bg"></div>
+<span class="material-symbols-outlined text-6xl text-primary-container relative z-10 animate-pulse">graphic_eq</span>
+</div>
+</div>
+</div>
+</main>
+<!-- Bottom Nav Bar (Mobile) -->
+<nav class="md:hidden fixed bottom-0 left-0 w-full flex justify-around items-center bg-surface py-2 px-margin-mobile z-50 border-t-2 border-outline-variant">
+<a class="flex flex-col items-center justify-center text-primary font-bold active:scale-90 transition-transform" href="#">
+<span class="material-symbols-outlined" style="font-variation-settings: 'FILL' 1;">home</span>
+<span class="font-label-sm text-label-sm">Home</span>
+</a>
+<a class="flex flex-col items-center justify-center text-on-surface-variant hover:text-primary active:scale-90 transition-transform" href="#">
+<span class="material-symbols-outlined">list_alt</span>
+<span class="font-label-sm text-label-sm">Queue</span>
+</a>
+<a class="flex flex-col items-center justify-center text-on-surface-variant hover:text-primary active:scale-90 transition-transform" href="#">
+<span class="material-symbols-outlined">add_box</span>
+<span class="font-label-sm text-label-sm">Add</span>
+</a>
+<a class="flex flex-col items-center justify-center text-on-surface-variant hover:text-primary active:scale-90 transition-transform" href="#">
+<span class="material-symbols-outlined">person</span>
+<span class="font-label-sm text-label-sm">Account</span>
+</a>
+</nav>
+
+
+</body></html>
