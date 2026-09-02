@@ -1,5 +1,6 @@
 - improve voice picker to show language and gender separately
 - default language setting for all episodes, but configurable
+- add link to wallabag in show notes
 - reduce verbose comments
 - exclude articles with code blocks 
 - websocket connection instead of polling
