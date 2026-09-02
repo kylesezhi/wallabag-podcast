@@ -2,6 +2,7 @@
 - default language setting for all episodes, but configurable
 - add link to wallabag in show notes
 - add by wallabag entry number
+- recaculate time and articles after clicking add random articles
 - reduce verbose comments
 - exclude articles with code blocks 
 - websocket connection instead of polling
