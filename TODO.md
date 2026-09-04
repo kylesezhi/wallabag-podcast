@@ -1,9 +1,8 @@
 - improve voice picker to show language and gender separately
-- default language setting for all episodes, but configurable
-- add link to wallabag in show notes
+- default voice setting for all episodes, but configurable
 - add by wallabag entry number
 - recaculate time and articles after clicking add random articles
-- reduce verbose comments
+- reduce verbose comments in code
 - exclude articles with code blocks 
 - websocket connection instead of polling
 - birthday shoutouts
