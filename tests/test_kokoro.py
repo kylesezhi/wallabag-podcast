@@ -43,6 +43,7 @@ async def test_voices_returns_voice_dicts():
                     {"id": "af_heart", "name": "Heart"},
                     {"id": "am_michael", "name": "Michael"},
                     {"id": "bm_daniel", "name": "Daniel"},
+                    {"id": "ef_dora", "name": "Dora"},
                 ]
             },
         )
@@ -50,9 +51,10 @@ async def test_voices_returns_voice_dicts():
     client = _make_client(handler)
     result = await client.voices()
     assert result == [
-        {"id": "af_heart", "label": "Heart, English (American)"},
-        {"id": "am_michael", "label": "Michael, English (American)"},
-        {"id": "bm_daniel", "label": "Daniel, English (British)"},
+        {"id": "af_heart", "label": "Heart, Female - American English"},
+        {"id": "am_michael", "label": "Michael, Male - American English"},
+        {"id": "bm_daniel", "label": "Daniel, Male - British English"},
+        {"id": "ef_dora", "label": "Dora, Female - Spanish"},
     ]
 
 

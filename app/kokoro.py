@@ -74,18 +74,28 @@ class KokoroClient:
 
     # -- public API ---------------------------------------------------------
 
-    _LOCALE_LABELS: dict[str, str] = {
-        "af": "English (American)",
-        "am": "English (American)",
-        "bf": "English (British)",
-        "bm": "English (British)",
+    _LANGUAGE_LABELS: dict[str, str] = {
+        "a": "American English",
+        "b": "British English",
+        "e": "Spanish",
+        "f": "French",
+        "h": "Hindi",
+        "i": "Italian",
+        "j": "Japanese",
+        "p": "Portuguese",
+        "z": "Chinese (Mandarin)",
+    }
+
+    _GENDER_LABELS: dict[str, str] = {
+        "f": "Female",
+        "m": "Male",
     }
 
     async def voices(self) -> list[dict[str, str]]:
         """Return available voices as ``[{"id": ..., "label": ...}, ...]``.
 
         The *label* is a human-readable string derived from the API name
-        and the ID prefix, e.g. ``"Daniel, English (British)"``.
+        and the ID prefix, e.g. ``"Daniel, Male - British English"``.
 
         Raises :class:`KokoroConnectionError` on network failure and
         :class:`KokoroError` on a non-2xx response.
@@ -110,8 +120,16 @@ class KokoroClient:
                 continue
             name = voice.get("name", vid)
             prefix = vid.split("_", 1)[0] if "_" in vid else ""
-            locale = self._LOCALE_LABELS.get(prefix, "")
-            label = f"{name}, {locale}" if locale else name
+            lang_char = prefix[0] if len(prefix) >= 1 else ""
+            gender_char = prefix[1] if len(prefix) >= 2 else ""
+            language = self._LANGUAGE_LABELS.get(lang_char, "")
+            gender = self._GENDER_LABELS.get(gender_char, "")
+            if language and gender:
+                label = f"{name}, {gender} - {language}"
+            elif language:
+                label = f"{name} - {language}"
+            else:
+                label = name
             result.append({"id": vid, "label": label})
         return result
 
