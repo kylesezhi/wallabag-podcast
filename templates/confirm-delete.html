@@ -1,0 +1,13 @@
+{% extends "base.html" %}
+{% block title %}Remove Episode — {{ feed_title }}{% endblock %}
+{% block content %}
+<h1 class="page-title">Remove Episode</h1>
+<div class="card">
+  <p>Remove <strong>{{ title }}</strong> from the podcast?</p>
+  <p class="section-hint">The article stays unread in Wallabag.</p>
+  <form method="post" action="/queue/{{ episode_id }}/delete" style="display:inline">
+    <button type="submit" class="btn btn-secondary">Remove</button>
+  </form>
+  <a href="/" style="margin-left:1rem">Cancel</a>
+</div>
+{% endblock %}

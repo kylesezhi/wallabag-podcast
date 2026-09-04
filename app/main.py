@@ -343,6 +343,29 @@ async def queue_add_random():
     return _redirect("/", message=f"Added {count} random articles")
 
 
+@app.get("/episode/{episode_id}/delete")
+async def confirm_delete(request: Request, episode_id: int):
+    conn = connect()
+    try:
+        row = conn.execute(
+            "SELECT title, status FROM episodes WHERE id=?", (episode_id,)
+        ).fetchone()
+    finally:
+        conn.close()
+    if row is None or row[1] == "archived":
+        return _redirect("/", error="Episode not found")
+    settings = get_settings()
+    return templates.TemplateResponse(
+        request,
+        "confirm-delete.html",
+        {
+            "episode_id": episode_id,
+            "title": row[0],
+            "feed_title": settings.FEED_TITLE,
+        },
+    )
+
+
 @app.post("/queue/{episode_id}/delete")
 async def queue_delete(request: Request, episode_id: int):
     conn = connect()

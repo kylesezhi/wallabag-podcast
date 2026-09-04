@@ -482,6 +482,62 @@ def test_delete_nonexistent(client):
     assert "error" in response.headers["location"]
 
 
+def test_confirm_delete_renders(client):
+    with sqlite3.connect(get_db_path()) as conn:
+        _insert_staged(conn, [(1, "To Delete")])
+        episode_id = conn.execute(
+            "SELECT id FROM episodes WHERE wallabag_id=1"
+        ).fetchone()[0]
+
+    response = client.get(f"/episode/{episode_id}/delete")
+
+    assert response.status_code == 200
+    assert "To Delete" in response.text
+    assert f"/queue/{episode_id}/delete" in response.text
+
+
+def test_confirm_delete_nonexistent(client):
+    response = client.get("/episode/9999/delete", follow_redirects=False)
+
+    assert response.status_code == 303
+    assert "error" in response.headers["location"]
+
+
+def test_confirm_delete_archived(client):
+    with sqlite3.connect(get_db_path()) as conn:
+        conn.execute(
+            "INSERT INTO episodes (wallabag_id, title, source, url, status, "
+            "est_minutes, language, created_at) VALUES (1, 'Archived', "
+            "'example.com/1', 'https://example.com/1', 'archived', 5, 'en', "
+            "'2026-01-01T00:00:00+00:00')"
+        )
+        conn.commit()
+        episode_id = conn.execute(
+            "SELECT id FROM episodes WHERE wallabag_id=1"
+        ).fetchone()[0]
+
+    response = client.get(f"/episode/{episode_id}/delete", follow_redirects=False)
+
+    assert response.status_code == 303
+    assert "error" in response.headers["location"]
+
+
+def test_rss_description_includes_delete_link(env):
+    from app.rss import build_feed
+    import xml.etree.ElementTree as ET
+
+    with sqlite3.connect(get_db_path()) as conn:
+        _insert_done(conn, 3, "Test Article")
+
+    feed = build_feed()
+    root = ET.fromstring(feed)
+    items = root.findall("channel/item")
+    assert len(items) == 1
+    desc = items[0].find("description").text
+    assert "/episode/" in desc
+    assert "/delete" in desc
+
+
 def test_generate_no_staged(client):
     response = client.post("/queue/generate", follow_redirects=False)
 

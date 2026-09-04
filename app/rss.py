@@ -82,9 +82,11 @@ def build_feed(settings: Settings | None = None) -> bytes:
             f"{settings.WALLABAG_URL.rstrip('/')}/view/{episode['wallabag_id']}"
         )
         entry.title(episode["title"])
+        delete_url = f"{settings.BASE_URL}/episode/{episode['id']}/delete"
         entry.description(
             f"{episode['title']} — from {episode['source']}"
             f"\n\nRead the original: {wallabag_url}"
+            f"\n\nRemove from podcast: {delete_url}"
         )
         entry.link(href=wallabag_url)
         entry.guid(f"{settings.BASE_URL}/audio/{episode['id']}.mp3")
