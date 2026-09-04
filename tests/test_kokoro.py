@@ -58,6 +58,26 @@ async def test_voices_returns_voice_dicts():
     ]
 
 
+async def test_voices_derives_name_when_api_returns_id_as_name():
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "voices": [
+                    {"id": "bm_daniel", "name": "bm_daniel"},
+                    {"id": "af_heart"},
+                ]
+            },
+        )
+
+    client = _make_client(handler)
+    result = await client.voices()
+    assert result == [
+        {"id": "bm_daniel", "label": "Daniel, Male - British English"},
+        {"id": "af_heart", "label": "Heart, Female - American English"},
+    ]
+
+
 async def test_synthesize_returns_audio_bytes():
     captured = {}
 

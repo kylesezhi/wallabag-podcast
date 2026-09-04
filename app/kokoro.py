@@ -118,7 +118,11 @@ class KokoroClient:
             vid = voice.get("id")
             if not vid:
                 continue
-            name = voice.get("name", vid)
+            name = voice.get("name", "")
+            # Derive a fallback from the ID so we never show raw IDs.
+            id_name = vid.split("_", 1)[1].capitalize() if "_" in vid else vid
+            # Use the API name only if it's a proper human name (not the ID).
+            name = name if name and name != vid else id_name
             prefix = vid.split("_", 1)[0] if "_" in vid else ""
             lang_char = prefix[0] if len(prefix) >= 1 else ""
             gender_char = prefix[1] if len(prefix) >= 2 else ""
