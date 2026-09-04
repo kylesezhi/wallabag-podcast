@@ -78,8 +78,15 @@ def build_feed(settings: Settings | None = None) -> bytes:
         # feedgen's add_entry() prepends by default; append so the newest-first
         # order returned by get_feed_episodes() is preserved in the feed.
         entry = fg.add_entry(order="append")
+        wallabag_url = (
+            f"{settings.WALLABAG_URL.rstrip('/')}/view/{episode['wallabag_id']}"
+        )
         entry.title(episode["title"])
-        entry.description(f"{episode['title']} — from {episode['source']}")
+        entry.description(
+            f"{episode['title']} — from {episode['source']}"
+            f"\n\nRead the original: {wallabag_url}"
+        )
+        entry.link(href=wallabag_url)
         entry.guid(f"{settings.BASE_URL}/audio/{episode['id']}.mp3")
         entry.pubDate(_parse_generated_at(episode["generated_at"]))
         entry.enclosure(

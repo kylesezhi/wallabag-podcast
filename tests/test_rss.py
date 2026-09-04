@@ -102,6 +102,31 @@ def test_valid_rss(env):
         assert item.find("itunes:image", _NS).get("href") == f"{base_url}/static/cover.png"
 
 
+def test_description_includes_wallabag_link(env):
+    with sqlite3.connect(get_db_path()) as conn:
+        _insert_done(conn, 42, "My Article", "2026-01-01T00:00:00+00:00")
+
+    items = _feed_items(build_feed())
+    assert len(items) == 1
+    desc = items[0].find("description").text
+    assert "My Article" in desc
+    assert "example.com/42" in desc
+    wallabag_url = items[0].find("link").text
+    expected_base = get_settings().WALLABAG_URL.rstrip("/")
+    assert wallabag_url == f"{expected_base}/view/42"
+
+
+def test_entry_link_points_to_wallabag(env):
+    with sqlite3.connect(get_db_path()) as conn:
+        _insert_done(conn, 7, "Linked Article", "2026-01-01T00:00:00+00:00")
+
+    items = _feed_items(build_feed())
+    link = items[0].find("link")
+    assert link is not None
+    expected_base = get_settings().WALLABAG_URL.rstrip("/")
+    assert link.text == f"{expected_base}/view/7"
+
+
 def test_enclosure_correctness(env):
     audio_dir = env / "audio"
     audio_dir.mkdir(parents=True, exist_ok=True)
