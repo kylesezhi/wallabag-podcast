@@ -290,12 +290,13 @@ async def settings_page(
         voices = []
         kokoro_error = str(exc)
     if not voices:
-        voices = [get_settings().KOKORO_DEFAULT_VOICE]
+        default_id = get_settings().KOKORO_DEFAULT_VOICE
+        voices = [{"id": default_id, "label": default_id}]
 
     conn = connect()
     try:
         articles_per_drive = get_setting(conn, "articles_per_drive") or "10"
-        voice = get_setting(conn, "voice") or voices[0]
+        voice = get_setting(conn, "voice") or voices[0]["id"]
         automation_time = get_setting(conn, "automation_time") or "07:00"
     finally:
         conn.close()

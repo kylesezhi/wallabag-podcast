@@ -1,7 +1,7 @@
 """Kokoro TTS client (async, httpx) and audio duration measurement (mutagen).
 
 Talks to a Kokoro-FastAPI server:
-- ``GET  {base}/v1/audio/voices``  -> available voice ID strings
+- ``GET  {base}/v1/audio/voices``  -> available voices (id + label)
 - ``POST {base}/v1/audio/speech``  -> synthesized audio bytes (mp3)
 
 No real authentication is required; a dummy ``Authorization: Bearer not-needed``
@@ -74,8 +74,18 @@ class KokoroClient:
 
     # -- public API ---------------------------------------------------------
 
-    async def voices(self) -> list[str]:
-        """Return the available voice ID strings.
+    _LOCALE_LABELS: dict[str, str] = {
+        "af": "English (American)",
+        "am": "English (American)",
+        "bf": "English (British)",
+        "bm": "English (British)",
+    }
+
+    async def voices(self) -> list[dict[str, str]]:
+        """Return available voices as ``[{"id": ..., "label": ...}, ...]``.
+
+        The *label* is a human-readable string derived from the API name
+        and the ID prefix, e.g. ``"Daniel, English (British)"``.
 
         Raises :class:`KokoroConnectionError` on network failure and
         :class:`KokoroError` on a non-2xx response.
@@ -93,7 +103,17 @@ class KokoroClient:
             raise KokoroError(self._error_message(resp))
 
         payload = resp.json()
-        return [voice["id"] for voice in payload.get("voices", []) if voice.get("id")]
+        result: list[dict[str, str]] = []
+        for voice in payload.get("voices", []):
+            vid = voice.get("id")
+            if not vid:
+                continue
+            name = voice.get("name", vid)
+            prefix = vid.split("_", 1)[0] if "_" in vid else ""
+            locale = self._LOCALE_LABELS.get(prefix, "")
+            label = f"{name}, {locale}" if locale else name
+            result.append({"id": vid, "label": label})
+        return result
 
     async def synthesize(
         self,

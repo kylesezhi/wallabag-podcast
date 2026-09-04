@@ -33,7 +33,7 @@ def _make_client(handler, settings=None) -> KokoroClient:
     return KokoroClient(settings=settings or _settings(), client=client)
 
 
-async def test_voices_returns_voice_ids():
+async def test_voices_returns_voice_dicts():
     def handler(request: httpx.Request) -> httpx.Response:
         assert request.url.path == "/v1/audio/voices"
         return httpx.Response(
@@ -42,12 +42,18 @@ async def test_voices_returns_voice_ids():
                 "voices": [
                     {"id": "af_heart", "name": "Heart"},
                     {"id": "am_michael", "name": "Michael"},
+                    {"id": "bm_daniel", "name": "Daniel"},
                 ]
             },
         )
 
     client = _make_client(handler)
-    assert await client.voices() == ["af_heart", "am_michael"]
+    result = await client.voices()
+    assert result == [
+        {"id": "af_heart", "label": "Heart, English (American)"},
+        {"id": "am_michael", "label": "Michael, English (American)"},
+        {"id": "bm_daniel", "label": "Daniel, English (British)"},
+    ]
 
 
 async def test_synthesize_returns_audio_bytes():

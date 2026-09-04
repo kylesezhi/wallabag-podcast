@@ -43,7 +43,7 @@
         <label for="voice">Voice</label>
         <select id="voice" name="voice">
           {% for v in voices %}
-          <option value="{{ v }}" {% if v == voice %}selected{% endif %}>{{ v }}</option>
+          <option value="{{ v.id }}" {% if v.id == voice %}selected{% endif %}>{{ v.label }}</option>
           {% endfor %}
         </select>
         {% if kokoro_error %}

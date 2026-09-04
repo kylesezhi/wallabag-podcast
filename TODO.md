@@ -1,5 +1,4 @@
-- improve voice picker to show language and gender separately
-- default voice setting for all episodes, but configurable
+- default voice setting for all episodes, but configurable on per ep basis before generation
 - add by wallabag entry number
 - recaculate time and articles after clicking add random articles
 - reduce verbose comments in code
