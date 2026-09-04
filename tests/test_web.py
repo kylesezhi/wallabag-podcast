@@ -534,8 +534,11 @@ def test_rss_description_includes_delete_link(env):
     items = root.findall("channel/item")
     assert len(items) == 1
     desc = items[0].find("description").text
-    assert "/episode/" in desc
-    assert "/delete" in desc
+    content = items[0].find("{http://purl.org/rss/1.0/modules/content/}encoded")
+    assert content is not None
+    assert '<a href="' in content.text
+    assert "/episode/" in content.text
+    assert "/delete" in content.text
 
 
 def test_generate_no_staged(client):

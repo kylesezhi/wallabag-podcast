@@ -20,6 +20,7 @@ _REQUIRED_ENV = {
     "WALLABAG_CLIENT_SECRET": "test_client_secret",
     "WALLABAG_USERNAME": "test_user",
     "WALLABAG_PASSWORD": "test_pass",
+    "WALLABAG_URL": "https://wallabag.test",
 }
 
 _NS = {"itunes": "http://www.itunes.com/dtds/podcast-1.0.dtd"}
@@ -111,6 +112,9 @@ def test_description_includes_wallabag_link(env):
     desc = items[0].find("description").text
     assert "My Article" in desc
     assert "example.com/42" in desc
+    content = items[0].find("{http://purl.org/rss/1.0/modules/content/}encoded")
+    assert content is not None
+    assert '<a href="https://wallabag.test/view/42">' in content.text
     wallabag_url = items[0].find("link").text
     expected_base = get_settings().WALLABAG_URL.rstrip("/")
     assert wallabag_url == f"{expected_base}/view/42"

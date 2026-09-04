@@ -88,6 +88,12 @@ def build_feed(settings: Settings | None = None) -> bytes:
             f"\n\nRead the original: {wallabag_url}"
             f"\n\nRemove from podcast: {delete_url}"
         )
+        entry.content(
+            f"<p>{episode['title']} — from {episode['source']}</p>"
+            f'<p>Read the original: <a href="{wallabag_url}">{wallabag_url}</a></p>'
+            f'<p>Remove from podcast: <a href="{delete_url}">{delete_url}</a></p>',
+            type="CDATA",
+        )
         entry.link(href=wallabag_url)
         entry.guid(f"{settings.BASE_URL}/audio/{episode['id']}.mp3")
         entry.pubDate(_parse_generated_at(episode["generated_at"]))
