@@ -1,0 +1,442 @@
+<!DOCTYPE html>
+
+<html class="dark" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>Settings — Kyle's Morning Drive</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com" rel="preconnect"/>
+<link crossorigin="" href="https://fonts.gstatic.com" rel="preconnect"/>
+<link href="https://fonts.googleapis.com/css2?family=Hanken+Grotesk:ital,wght@0,300..700;1,300..700&amp;family=JetBrains+Mono:wght@400;500;600&amp;family=Literata:ital,opsz,wght@0,7..72,200..900;1,7..72,200..900&amp;family=Newsreader:ital,opsz,wght@0,6..72,200..800;1,6..72,200..800&amp;family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<style>
+    .material-symbols-outlined {
+        font-variation-settings: 'FILL' 0, 'wght' 350, 'GRAD' 0, 'opsz' 20;
+    }
+    
+    /* Sleek Editorial Minimalist Range Slider */
+    input[type=range] {
+        -webkit-appearance: none;
+        appearance: none;
+        background: transparent;
+    }
+    input[type=range]::-webkit-slider-thumb {
+        -webkit-appearance: none;
+        appearance: none;
+        height: 16px;
+        width: 16px;
+        border-radius: 9999px;
+        background: #f4bc7d;
+        cursor: pointer;
+        border: 2px solid #131313;
+        box-shadow: 0 0 0 1px #50453a;
+        margin-top: -6px;
+        transition: transform 0.1s ease;
+    }
+    input[type=range]::-webkit-slider-thumb:hover {
+        transform: scale(1.15);
+    }
+    input[type=range]::-webkit-slider-runnable-track {
+        width: 100%;
+        height: 4px;
+        cursor: pointer;
+        background: #2a2a2a;
+        border-radius: 9999px;
+    }
+    input[type=range]::-moz-range-thumb {
+        height: 16px;
+        width: 16px;
+        border-radius: 9999px;
+        background: #f4bc7d;
+        cursor: pointer;
+        border: 2px solid #131313;
+        box-shadow: 0 0 0 1px #50453a;
+    }
+    input[type=range]::-moz-range-track {
+        width: 100%;
+        height: 4px;
+        cursor: pointer;
+        background: #2a2a2a;
+        border-radius: 9999px;
+    }
+</style>
+<script id="tailwind-config">
+  tailwind.config = {
+    darkMode: "class",
+    theme: {
+      extend: {
+        "colors": {
+          "primary-fixed-dim": "#f4bc7d",
+          "surface-tint": "#f4bc7d",
+          "on-primary": "#482a00",
+          "surface-container-lowest": "#0e0e0e",
+          "primary": "#f4bc7d",
+          "outline": "#9d8e81",
+          "on-primary-container": "#4f2e00",
+          "tertiary-container": "#a09e9e",
+          "tertiary-fixed": "#e4e2e1",
+          "on-secondary-fixed": "#2b1700",
+          "on-secondary": "#432c0d",
+          "surface-dim": "#131313",
+          "surface-container-low": "#1c1b1b",
+          "on-secondary-fixed-variant": "#5c4221",
+          "surface-bright": "#393939",
+          "on-tertiary-container": "#363636",
+          "on-surface-variant": "#d4c4b5",
+          "inverse-surface": "#e5e2e1",
+          "outline-variant": "#50453a",
+          "error-container": "#93000a",
+          "on-tertiary": "#303030",
+          "inverse-on-surface": "#313030",
+          "secondary-fixed": "#ffddb9",
+          "secondary": "#e6c096",
+          "tertiary-fixed-dim": "#c8c6c5",
+          "surface-container-highest": "#353534",
+          "inverse-primary": "#7f5621",
+          "primary-container": "#c8955a",
+          "on-background": "#e5e2e1",
+          "on-surface": "#e5e2e1",
+          "background": "#131313",
+          "on-primary-fixed-variant": "#643e0a",
+          "error": "#ffb4ab",
+          "surface-container": "#201f1f",
+          "tertiary": "#c8c6c5",
+          "secondary-fixed-dim": "#e6c096",
+          "on-error": "#690005",
+          "surface-variant": "#353534",
+          "primary-fixed": "#ffddba",
+          "on-tertiary-fixed": "#1b1c1c",
+          "secondary-container": "#5c4221",
+          "on-error-container": "#ffdad6",
+          "on-primary-fixed": "#2b1700",
+          "on-tertiary-fixed-variant": "#474746",
+          "surface": "#131313",
+          "on-secondary-container": "#d4af86",
+          "surface-container-high": "#2a2a2a"
+        },
+        "borderRadius": {
+          "DEFAULT": "0.125rem",
+          "lg": "0.25rem",
+          "xl": "0.5rem",
+          "full": "0.75rem"
+        },
+        "spacing": {
+          "space-4xl": "6rem",
+          "space-xs": "0.5rem",
+          "content-column-wide": "56rem",
+          "space-sm": "0.75rem",
+          "space-xl": "2rem",
+          "gutter-mobile": "1.25rem",
+          "gutter-desktop": "2.5rem",
+          "reading-column-max": "42rem",
+          "space-2xs": "0.25rem",
+          "space-2xl": "3rem",
+          "space-lg": "1.5rem",
+          "space-md": "1rem",
+          "space-3xl": "4.5rem"
+        },
+        "fontFamily": {
+          "headline-lg": [
+            "Newsreader", "serif"
+          ],
+          "label-md": [
+            "Hanken Grotesk", "sans-serif"
+          ],
+          "body-ui": [
+            "Hanken Grotesk", "sans-serif"
+          ],
+          "display-lg": [
+            "Newsreader", "serif"
+          ],
+          "body-reading-md": [
+            "Literata", "serif"
+          ],
+          "code-meta": [
+            "JetBrains Mono", "monospace"
+          ],
+          "body-reading-lg": [
+            "Literata", "serif"
+          ],
+          "label-sm": [
+            "Hanken Grotesk", "sans-serif"
+          ],
+          "headline-md": [
+            "Newsreader", "serif"
+          ],
+          "title-md": [
+            "Newsreader", "serif"
+          ],
+          "headline-lg-mobile": [
+            "Newsreader", "serif"
+          ],
+          "headline-sm": [
+            "Newsreader", "serif"
+          ],
+          "display-lg-mobile": [
+            "Newsreader", "serif"
+          ]
+        },
+        "fontSize": {
+          "headline-lg": [
+            "32px",
+            {
+              "lineHeight": "42px",
+              "letterSpacing": "-0.01em",
+              "fontWeight": "400"
+            }
+          ],
+          "label-md": [
+            "12px",
+            {
+              "lineHeight": "16px",
+              "letterSpacing": "0.04em",
+              "fontWeight": "500"
+            }
+          ],
+          "body-ui": [
+            "14px",
+            {
+              "lineHeight": "20px",
+              "fontWeight": "400"
+            }
+          ],
+          "display-lg": [
+            "44px",
+            {
+              "lineHeight": "54px",
+              "letterSpacing": "-0.02em",
+              "fontWeight": "400"
+            }
+          ],
+          "body-reading-md": [
+            "17px",
+            {
+              "lineHeight": "28px",
+              "letterSpacing": "-0.002em",
+              "fontWeight": "400"
+            }
+          ],
+          "code-meta": [
+            "12px",
+            {
+              "lineHeight": "18px",
+              "fontWeight": "400"
+            }
+          ],
+          "body-reading-lg": [
+            "20px",
+            {
+              "lineHeight": "34px",
+              "letterSpacing": "-0.003em",
+              "fontWeight": "400"
+            }
+          ],
+          "label-sm": [
+            "11px",
+            {
+              "lineHeight": "14px",
+              "letterSpacing": "0.06em",
+              "fontWeight": "600"
+            }
+          ],
+          "headline-md": [
+            "24px",
+            {
+              "lineHeight": "32px",
+              "letterSpacing": "-0.005em",
+              "fontWeight": "400"
+            }
+          ],
+          "title-md": [
+            "18px",
+            {
+              "lineHeight": "26px",
+              "fontWeight": "500"
+            }
+          ],
+          "headline-lg-mobile": [
+            "26px",
+            {
+              "lineHeight": "34px",
+              "letterSpacing": "-0.01em",
+              "fontWeight": "400"
+            }
+          ],
+          "headline-sm": [
+            "20px",
+            {
+              "lineHeight": "28px",
+              "fontWeight": "500"
+            }
+          ],
+          "display-lg-mobile": [
+            "32px",
+            {
+              "lineHeight": "40px",
+              "letterSpacing": "-0.015em",
+              "fontWeight": "400"
+            }
+          ]
+        }
+      },
+    },
+  }
+</script>
+</head>
+<body class="bg-surface text-on-surface min-h-screen flex flex-col font-body-ui text-body-ui antialiased selection:bg-primary selection:text-on-primary">
+<!-- Clean Top Header (Breadcrumb / Title, no profile avatar, no sidebar) -->
+<header class="w-full border-b border-[#2e2c2b] bg-surface/95 backdrop-blur px-gutter-mobile md:px-gutter-desktop py-4 flex items-center justify-between sticky top-0 z-20">
+<div class="flex items-center gap-3">
+<a class="font-headline-sm text-headline-sm italic text-on-surface hover:text-primary transition-colors tracking-tight" href="#">
+      Kyle's Morning Drive
+    </a>
+<span class="text-outline-variant font-code-meta text-xs">/</span>
+<span class="font-body-ui text-xs uppercase tracking-widest text-on-surface-variant font-medium">Settings</span>
+</div>
+<div class="flex items-center gap-2">
+<span class="font-code-meta text-xs text-outline tracking-wider uppercase">System Preferences</span>
+</div>
+</header>
+<!-- Main Scrollable Canvas -->
+<main class="flex-1 px-gutter-mobile md:px-gutter-desktop py-8 md:py-12 max-w-5xl mx-auto w-full">
+<!-- Page Title & Editorial Dek -->
+<div class="mb-8 border-b border-[#2e2c2b] pb-5">
+<h1 class="font-headline-lg text-headline-lg font-normal text-on-surface tracking-tight">Configuration</h1>
+<p class="font-body-reading-md text-sm text-on-surface-variant mt-1">Manage content ingest pipelines, text-to-speech synthesis parameters, and syndication feeds.</p>
+</div>
+<!-- 2-Column Grid of Settings Cards -->
+<div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+<!-- Card 1: Wallabag Connection -->
+<section class="bg-surface-container-low border border-[#2e2c2b] rounded p-6 flex flex-col justify-between hover:border-outline-variant transition-colors">
+<div>
+<div class="flex items-center justify-between mb-4">
+<h2 class="font-headline-md text-headline-md text-on-surface font-normal">Wallabag Connection</h2>
+<span class="inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-[11px] font-code-meta tracking-wider uppercase bg-[#1d271e] text-[#86efac] border border-[#2b442d]">
+<span class="w-1.5 h-1.5 rounded-full bg-[#4ade80]"></span>
+            Connected
+          </span>
+</div>
+<div class="space-y-4">
+<div>
+<label class="block text-xs font-label-md uppercase tracking-wider text-on-surface-variant mb-1.5">Instance URL</label>
+<div class="bg-surface-container-lowest border border-[#2e2c2b] rounded px-3 py-2 font-code-meta text-xs text-on-surface select-all overflow-x-auto whitespace-nowrap">
+              http://192.168.42.223:8000/
+            </div>
+</div>
+<p class="font-body-ui text-xs text-on-surface-variant leading-relaxed">
+            API credentials and tokens live securely in your local <code class="font-code-meta text-[11px] text-primary bg-surface-container px-1.5 py-0.5 rounded border border-[#2e2c2b]">.env</code> file and are never transmitted to this client.
+          </p>
+</div>
+</div>
+<div class="pt-6 mt-6 border-t border-[#2e2c2b]">
+<button class="inline-flex items-center justify-center gap-2 bg-primary text-on-primary hover:bg-primary-fixed-dim font-label-md text-xs tracking-wider uppercase font-semibold px-4 py-2.5 rounded transition-all duration-150 active:scale-[0.98]" type="button">
+<span class="material-symbols-outlined text-[16px]">cable</span>
+          Test Connection
+        </button>
+</div>
+</section>
+<!-- Card 2: Generation Settings -->
+<section class="bg-surface-container-low border border-[#2e2c2b] rounded p-6 flex flex-col justify-between hover:border-outline-variant transition-colors">
+<div>
+<div class="flex items-center justify-between mb-4">
+<h2 class="font-headline-md text-headline-md text-on-surface font-normal">Generation Settings</h2>
+<span class="font-code-meta text-xs text-outline">TTS Engine</span>
+</div>
+<div class="space-y-6">
+<!-- Slider -->
+<div>
+<div class="flex justify-between items-baseline mb-2">
+<label class="text-xs font-label-md uppercase tracking-wider text-on-surface-variant" for="articles-slider">Articles per drive</label>
+<span class="font-code-meta text-sm text-primary font-medium" id="slider-val">10</span>
+</div>
+<input class="w-full" id="articles-slider" max="20" min="1" oninput="document.getElementById('slider-val').innerText = this.value" type="range" value="10"/>
+<div class="flex justify-between text-[10px] font-code-meta text-outline mt-1.5">
+<span>1 article</span>
+<span>10 (default)</span>
+<span>20 articles</span>
+</div>
+</div>
+<!-- Select -->
+<div>
+<label class="block text-xs font-label-md uppercase tracking-wider text-on-surface-variant mb-1.5" for="voice-select">Voice Model</label>
+<div class="relative">
+<select class="w-full appearance-none bg-surface-container-lowest border border-[#2e2c2b] text-on-surface text-xs font-code-meta px-3 py-2.5 pr-8 rounded focus:border-primary focus:ring-0 focus:outline-none cursor-pointer" id="voice-select">
+<option value="bm_daniel">bm_daniel — British English (Male)</option>
+<option value="en_us_male">en_us_male — American English (Male)</option>
+<option value="en_us_female">en_us_female — American English (Female)</option>
+</select>
+<span class="material-symbols-outlined absolute right-2.5 top-1/2 -translate-y-1/2 pointer-events-none text-outline text-[18px]">
+                expand_more
+              </span>
+</div>
+</div>
+</div>
+</div>
+<div class="pt-4 mt-6 border-t border-[#2e2c2b]">
+<p class="text-[11px] font-body-ui text-outline">Audio synthesizes locally prior to queue packaging.</p>
+</div>
+</section>
+<!-- Card 3: Podcast Settings -->
+<section class="bg-surface-container-low border border-[#2e2c2b] rounded p-6 flex flex-col justify-between hover:border-outline-variant transition-colors">
+<div>
+<div class="flex items-center justify-between mb-4">
+<h2 class="font-headline-md text-headline-md text-on-surface font-normal">Podcast Settings</h2>
+<span class="font-code-meta text-xs text-outline">RSS 2.0</span>
+</div>
+<div class="space-y-3.5">
+<div class="flex flex-col gap-1 pb-3 border-b border-[#2e2c2b]">
+<span class="text-xs font-label-md uppercase tracking-wider text-on-surface-variant">Feed Title</span>
+<span class="font-body-reading-md text-sm text-on-surface">Kyle's Morning Drive</span>
+</div>
+<div class="flex flex-col gap-1">
+<span class="text-xs font-label-md uppercase tracking-wider text-on-surface-variant">Feed URL</span>
+<div class="bg-surface-container-lowest border border-[#2e2c2b] rounded px-3 py-2 font-code-meta text-xs text-primary select-all overflow-x-auto whitespace-nowrap">
+              http://192.168.42.167:8000/feed.xml
+            </div>
+</div>
+<p class="font-body-ui text-xs text-on-surface-variant pt-2 leading-relaxed">
+            Modify values via <code class="font-code-meta text-[11px] text-primary bg-surface-container px-1 py-0.5 rounded border border-[#2e2c2b]">FEED_TITLE</code> and <code class="font-code-meta text-[11px] text-primary bg-surface-container px-1 py-0.5 rounded border border-[#2e2c2b]">BASE_URL</code> within your environment configuration.
+          </p>
+</div>
+</div>
+<div class="pt-4 mt-4 border-t border-[#2e2c2b] flex items-center justify-between">
+<span class="text-[11px] font-code-meta text-outline">Compatible with Overcast, Pocket Casts, Apple Podcasts</span>
+</div>
+</section>
+<!-- Card 4: Automation -->
+<section class="bg-surface-container-low border border-[#2e2c2b] rounded p-6 flex flex-col justify-between hover:border-outline-variant transition-colors">
+<div>
+<div class="flex items-center justify-between mb-4">
+<h2 class="font-headline-md text-headline-md text-on-surface font-normal">Automation</h2>
+<span class="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-code-meta tracking-wider uppercase bg-[#2a241b] text-primary border border-outline-variant">
+            Coming Soon
+          </span>
+</div>
+<div class="space-y-4">
+<div class="flex items-center justify-between py-3 border-b border-[#2e2c2b]">
+<div>
+<span class="block font-body-ui text-sm text-on-surface">Generate every morning</span>
+<span class="block text-[11px] text-outline font-body-ui">Auto-compile unread Wallabag articles</span>
+</div>
+<!-- Disabled sleek toggle -->
+<div class="w-10 h-5 bg-surface-container-highest rounded-full relative cursor-not-allowed opacity-60">
+<div class="w-4 h-4 bg-outline rounded-full absolute left-0.5 top-0.5"></div>
+</div>
+</div>
+<div class="flex items-center justify-between py-1">
+<span class="text-xs font-label-md uppercase tracking-wider text-on-surface-variant">Scheduled time</span>
+<span class="font-code-meta text-xs text-outline bg-surface-container-lowest px-2.5 py-1 rounded border border-[#2e2c2b]">--:-- AM</span>
+</div>
+</div>
+</div>
+<div class="pt-4 mt-6 border-t border-[#2e2c2b]">
+<p class="text-[11px] font-body-ui text-outline">Cron triggers will be managed via system service hooks.</p>
+</div>
+</section>
+</div>
+<!-- Editorial Colophon / Meta Footer -->
+<footer class="mt-14 pt-6 border-t border-[#2e2c2b] flex flex-col sm:flex-row items-center justify-between gap-3 text-xs text-outline font-code-meta">
+<span>Kyle's Morning Drive v0.4.1</span>
+<span>Editorial Reader Pipeline • Nocturne Theme</span>
+</footer>
+</main>
+</body></html>

@@ -1,0 +1,258 @@
+<!DOCTYPE html>
+
+<html class="dark" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>Settings - Kyle's Morning Drive</title>
+<link href="https://fonts.googleapis.com/css2?family=Newsreader:ital,opsz,wght@0,6..72,300..700;1,6..72,300..700&amp;family=Hanken+Grotesk:wght@300;400;500;600;700&amp;family=JetBrains+Mono:wght@400;500;600&amp;family=Literata:ital,opsz,wght@0,7..72,300..600;1,7..72,300..600&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<script id="tailwind-config">
+  tailwind.config = {
+    darkMode: "class",
+    theme: {
+      extend: {
+        "colors": {
+          "primary-fixed-dim": "#f4bc7d",
+          "surface-tint": "#f4bc7d",
+          "on-primary": "#482a00",
+          "surface-container-lowest": "#0e0e0e",
+          "primary": "#f4bc7d",
+          "outline": "#9d8e81",
+          "on-primary-container": "#4f2e00",
+          "tertiary-container": "#a09e9e",
+          "tertiary-fixed": "#e4e2e1",
+          "on-secondary-fixed": "#2b1700",
+          "on-secondary": "#432c0d",
+          "surface-dim": "#131313",
+          "surface-container-low": "#1c1b1b",
+          "on-secondary-fixed-variant": "#5c4221",
+          "surface-bright": "#393939",
+          "on-tertiary-container": "#363636",
+          "on-surface-variant": "#d4c4b5",
+          "inverse-surface": "#e5e2e1",
+          "outline-variant": "#50453a",
+          "error-container": "#93000a",
+          "on-tertiary": "#303030",
+          "inverse-on-surface": "#313030",
+          "secondary-fixed": "#ffddb9",
+          "secondary": "#e6c096",
+          "tertiary-fixed-dim": "#c8c6c5",
+          "surface-container-highest": "#353534",
+          "inverse-primary": "#7f5621",
+          "primary-container": "#c8955a",
+          "on-background": "#e5e2e1",
+          "on-surface": "#e5e2e1",
+          "background": "#131313",
+          "on-primary-fixed-variant": "#643e0a",
+          "error": "#ffb4ab",
+          "surface-container": "#201f1f",
+          "tertiary": "#c8c6c5",
+          "secondary-fixed-dim": "#e6c096",
+          "on-error": "#690005",
+          "surface-variant": "#353534",
+          "primary-fixed": "#ffddba",
+          "on-tertiary-fixed": "#1b1c1c",
+          "secondary-container": "#5c4221",
+          "on-error-container": "#ffdad6",
+          "on-primary-fixed": "#2b1700",
+          "on-tertiary-fixed-variant": "#474746",
+          "surface": "#131313",
+          "on-secondary-container": "#d4af86",
+          "surface-container-high": "#2a2a2a"
+        },
+        "borderRadius": {
+          "DEFAULT": "0.125rem",
+          "lg": "0.25rem",
+          "xl": "0.5rem",
+          "full": "9999px"
+        },
+        "spacing": {
+          "space-4xl": "6rem",
+          "space-xs": "0.5rem",
+          "content-column-wide": "56rem",
+          "space-sm": "0.75rem",
+          "space-xl": "2rem",
+          "gutter-mobile": "1.25rem",
+          "gutter-desktop": "2.5rem",
+          "reading-column-max": "42rem",
+          "space-2xs": "0.25rem",
+          "space-2xl": "3rem",
+          "space-lg": "1.5rem",
+          "space-md": "1rem",
+          "space-3xl": "4.5rem"
+        },
+        "fontFamily": {
+          "headline-lg": ["Newsreader", "serif"],
+          "label-md": ["Hanken Grotesk", "sans-serif"],
+          "body-ui": ["Hanken Grotesk", "sans-serif"],
+          "display-lg": ["Newsreader", "serif"],
+          "body-reading-md": ["Literata", "serif"],
+          "code-meta": ["JetBrains Mono", "monospace"],
+          "body-reading-lg": ["Literata", "serif"],
+          "label-sm": ["Hanken Grotesk", "sans-serif"],
+          "headline-md": ["Newsreader", "serif"],
+          "title-md": ["Newsreader", "serif"],
+          "headline-lg-mobile": ["Newsreader", "serif"],
+          "headline-sm": ["Newsreader", "serif"],
+          "display-lg-mobile": ["Newsreader", "serif"]
+        }
+      },
+    },
+  }
+</script>
+<style>
+  input[type=range] {
+    -webkit-appearance: none;
+    appearance: none;
+    background: transparent;
+  }
+  input[type=range]::-webkit-slider-runnable-track {
+    height: 4px;
+    border-radius: 9999px;
+    background-color: #2e2c2b;
+  }
+  input[type=range]::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    appearance: none;
+    height: 18px;
+    width: 18px;
+    border-radius: 50%;
+    background: #f4bc7d;
+    cursor: pointer;
+    margin-top: -7px;
+    border: 2px solid #131313;
+    box-shadow: 0 0 0 1px rgba(244, 188, 125, 0.35);
+    transition: transform 0.15s ease, box-shadow 0.15s ease;
+  }
+  input[type=range]::-webkit-slider-thumb:hover {
+    transform: scale(1.15);
+    box-shadow: 0 0 0 4px rgba(244, 188, 125, 0.2);
+  }
+  input[type=range]::-moz-range-track {
+    height: 4px;
+    border-radius: 9999px;
+    background-color: #2e2c2b;
+  }
+  input[type=range]::-moz-range-thumb {
+    height: 18px;
+    width: 18px;
+    border-radius: 50%;
+    background: #f4bc7d;
+    cursor: pointer;
+    border: 2px solid #131313;
+  }
+</style>
+</head>
+<body class="bg-[#131313] text-on-surface min-h-screen font-body-ui text-[14px] leading-relaxed antialiased">
+<!-- TopAppBar -->
+<header class="bg-[#131313]/95 backdrop-blur-md sticky top-0 border-b border-[#2e2c2b] flex items-center justify-between px-5 h-16 z-50">
+<button aria-label="Go back" class="text-on-surface-variant hover:text-primary transition-colors p-2 -ml-2 rounded-lg flex items-center justify-center">
+<span class="material-symbols-outlined text-[22px]">arrow_back</span>
+</button>
+<h1 class="font-headline-lg-mobile text-[22px] font-normal tracking-tight text-primary">Settings</h1>
+<button aria-label="Options" class="text-on-surface-variant hover:text-primary transition-colors p-2 -mr-2 rounded-lg flex items-center justify-center">
+<span class="material-symbols-outlined text-[22px]">settings</span>
+</button>
+</header>
+<main class="px-5 py-6 max-w-xl mx-auto space-y-5 pb-12">
+<!-- Section 1: Wallabag Connection -->
+<section class="bg-[#1c1b1b] border border-[#2e2c2b] rounded-xl p-5 shadow-sm">
+<h2 class="font-headline-md text-[20px] font-normal tracking-tight text-primary mb-4">Wallabag Connection</h2>
+<div class="space-y-4">
+<div class="flex items-center justify-between">
+<span class="text-on-surface-variant text-[13px] tracking-wide font-medium">Status</span>
+<span class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-code-meta font-medium tracking-wider uppercase bg-[#1e2a22] text-[#86b595] border border-[#2e4334]">
+<span class="w-1.5 h-1.5 rounded-full bg-[#86b595]"></span>
+          CONNECTED
+        </span>
+</div>
+<div class="space-y-1.5">
+<label class="block text-[12px] font-medium tracking-wider uppercase text-on-surface-variant/80 font-code-meta">URL</label>
+<div class="font-code-meta text-[13px] text-on-surface break-all bg-[#131313] border border-[#2e2c2b] p-3 rounded-lg select-all">
+          http://192.168.42.223:8000/
+        </div>
+</div>
+<p class="text-on-surface-variant/75 text-[12px] leading-relaxed border-l-2 border-primary/50 pl-3 italic font-body-reading-md">
+        Credentials live only in your .env file and are never shown here.
+      </p>
+<div class="pt-1">
+<button class="bg-[#2a2318] hover:bg-[#382d1c] active:bg-[#43351f] text-primary border border-primary/30 hover:border-primary/60 font-medium text-[13px] py-2.5 px-4 rounded-lg w-full sm:w-auto transition-all inline-flex items-center justify-center gap-2">
+<span class="material-symbols-outlined text-[16px]">sync_saved_locally</span>
+          Test Connection
+        </button>
+</div>
+</div>
+</section>
+<!-- Section 2: Generation Settings -->
+<section class="bg-[#1c1b1b] border border-[#2e2c2b] rounded-xl p-5 shadow-sm">
+<h2 class="font-headline-md text-[20px] font-normal tracking-tight text-primary mb-4">Generation Settings</h2>
+<div class="space-y-5">
+<div class="space-y-2">
+<div class="flex justify-between items-baseline">
+<label class="text-[13px] font-medium text-on-surface tracking-wide" for="articleSlider">Articles per drive</label>
+<span class="font-code-meta text-[16px] font-medium text-primary tracking-tight" id="sliderValue">10</span>
+</div>
+<div class="py-1">
+<input class="w-full cursor-pointer" id="articleSlider" max="50" min="1" oninput="document.getElementById('sliderValue').innerText = this.value" type="range" value="10"/>
+</div>
+<div class="flex justify-between text-[11px] font-code-meta text-on-surface-variant/60 pt-0.5">
+<span>1</span>
+<span>25</span>
+<span>50</span>
+</div>
+</div>
+<div class="space-y-1.5 pt-1">
+<label class="block text-[13px] font-medium text-on-surface tracking-wide" for="voiceSelect">Voice</label>
+<div class="relative">
+<select class="w-full bg-[#131313] text-on-surface border border-[#2e2c2b] rounded-lg py-2.5 px-3 pr-10 appearance-none font-code-meta text-[13px] focus:outline-none focus:border-primary/60 focus:ring-1 focus:ring-primary/40 transition-colors" id="voiceSelect">
+<option selected="" value="bm_daniel">bm_daniel</option>
+<option value="bm_fable">bm_fable</option>
+<option value="bm_onyx">bm_onyx</option>
+</select>
+<span class="material-symbols-outlined absolute right-3 top-1/2 -translate-y-1/2 text-on-surface-variant pointer-events-none text-[18px]">expand_more</span>
+</div>
+</div>
+</div>
+</section>
+<!-- Section 3: Podcast Settings -->
+<section class="bg-[#1c1b1b] border border-[#2e2c2b] rounded-xl p-5 shadow-sm">
+<h2 class="font-headline-md text-[20px] font-normal tracking-tight text-primary mb-4">Podcast Settings</h2>
+<div class="space-y-4">
+<div class="flex flex-col gap-1">
+<span class="text-[12px] font-medium tracking-wider uppercase text-on-surface-variant/80 font-code-meta">Feed title</span>
+<span class="text-[15px] font-headline-sm text-on-surface tracking-tight">Kyle's Morning Drive</span>
+</div>
+<div class="space-y-1.5">
+<div class="flex items-center justify-between">
+<span class="text-[12px] font-medium tracking-wider uppercase text-on-surface-variant/80 font-code-meta">Feed URL</span>
+<button class="text-primary hover:text-secondary text-[11px] font-code-meta inline-flex items-center gap-1 transition-colors" onclick="navigator.clipboard?.writeText('http://192.168.42.167:8000/feed.xml')">
+<span class="material-symbols-outlined text-[14px]">content_copy</span>
+            Copy
+          </button>
+</div>
+<div class="font-code-meta text-[13px] text-on-surface break-all bg-[#131313] border border-[#2e2c2b] p-3 rounded-lg select-all">
+          http://192.168.42.167:8000/feed.xml
+        </div>
+</div>
+<p class="text-on-surface-variant/75 text-[12px] leading-relaxed border-l-2 border-primary/50 pl-3 italic font-body-reading-md">
+        Change these via FEED_TITLE and BASE_URL in .env.
+      </p>
+</div>
+</section>
+<!-- Section 4: Automation -->
+<section class="bg-[#1c1b1b] border border-[#2e2c2b] rounded-xl p-5 shadow-sm">
+<h2 class="font-headline-md text-[20px] font-normal tracking-tight text-primary mb-4">Automation</h2>
+<div class="flex items-center justify-between gap-4">
+<div class="space-y-0.5">
+<span class="font-headline-sm text-[16px] text-on-surface block tracking-tight">Nightly Build</span>
+<span class="text-on-surface-variant/80 text-[12px] block">Automatically generate episodes</span>
+</div>
+<label class="relative inline-flex items-center cursor-pointer flex-shrink-0">
+<input checked="" class="sr-only peer" type="checkbox"/>
+<div class="w-11 h-6 bg-[#2a2a2a] peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-transparent after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-[#131313] after:border after:border-[#353534] after:rounded-full after:h-5 after:w-5 after:transition-all border border-[#3e3b38] peer-checked:bg-primary peer-checked:after:bg-[#2b1700]"></div>
+</label>
+</div>
+</section>
+</main>
+</body></html>

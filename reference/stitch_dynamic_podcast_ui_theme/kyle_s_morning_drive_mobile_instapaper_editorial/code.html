@@ -1,0 +1,222 @@
+<!DOCTYPE html>
+
+<html class="dark" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>Kyle's Morning Drive - Dashboard</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com" rel="preconnect"/>
+<link crossorigin="" href="https://fonts.gstatic.com" rel="preconnect"/>
+<link href="https://fonts.googleapis.com/css2?family=Hanken+Grotesk:ital,wght@0,300..700;1,300..700&amp;family=JetBrains+Mono:wght@400;500&amp;family=Newsreader:ital,opsz,wght@0,6..72,300..700;1,6..72,300..700&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+  tailwind.config = {
+    darkMode: "class",
+    theme: {
+      extend: {
+        "colors": {
+          "primary-fixed-dim": "#f4bc7d",
+          "surface-tint": "#f4bc7d",
+          "on-primary": "#482a00",
+          "surface-container-lowest": "#0e0e0e",
+          "primary": "#f4bc7d",
+          "outline": "#9d8e81",
+          "on-primary-container": "#4f2e00",
+          "tertiary-container": "#a09e9e",
+          "tertiary-fixed": "#e4e2e1",
+          "on-secondary-fixed": "#2b1700",
+          "on-secondary": "#432c0d",
+          "surface-dim": "#131313",
+          "surface-container-low": "#1c1b1b",
+          "on-secondary-fixed-variant": "#5c4221",
+          "surface-bright": "#393939",
+          "on-tertiary-container": "#363636",
+          "on-surface-variant": "#a5a19a",
+          "inverse-surface": "#e5e2e1",
+          "outline-variant": "#2e2c2b",
+          "error-container": "#93000a",
+          "on-tertiary": "#303030",
+          "inverse-on-surface": "#313030",
+          "secondary-fixed": "#ffddb9",
+          "secondary": "#e6c096",
+          "tertiary-fixed-dim": "#c8c6c5",
+          "surface-container-highest": "#2e2c2b",
+          "inverse-primary": "#7f5621",
+          "primary-container": "#c8955a",
+          "on-background": "#e8e6e3",
+          "on-surface": "#e8e6e3",
+          "background": "#131313",
+          "on-primary-fixed-variant": "#643e0a",
+          "error": "#e07a70",
+          "surface-container": "#1c1b1b",
+          "tertiary": "#c8c6c5",
+          "secondary-fixed-dim": "#e6c096",
+          "on-error": "#690005",
+          "surface-variant": "#262423",
+          "primary-fixed": "#ffddba",
+          "on-tertiary-fixed": "#1b1c1c",
+          "secondary-container": "#5c4221",
+          "on-error-container": "#ffdad6",
+          "on-primary-fixed": "#2b1700",
+          "on-tertiary-fixed-variant": "#474746",
+          "surface": "#131313",
+          "on-secondary-container": "#d4af86",
+          "surface-container-high": "#242221"
+        },
+        "fontFamily": {
+          "headline-lg": ["Newsreader", "serif"],
+          "headline-md": ["Newsreader", "serif"],
+          "title-serif": ["Newsreader", "serif"],
+          "label-md": ["Hanken Grotesk", "sans-serif"],
+          "body-ui": ["Hanken Grotesk", "sans-serif"],
+          "code-meta": ["JetBrains Mono", "monospace"]
+        }
+      }
+    }
+  }
+</script>
+<style>
+  ::selection {
+    background-color: #352c22;
+    color: #f4bc7d;
+  }
+</style>
+</head>
+<body class="bg-surface text-on-surface font-body-ui min-h-screen antialiased selection:bg-[#352c22] selection:text-primary">
+<!-- TopAppBar -->
+<header class="w-full border-b border-outline-variant/80 flex justify-between items-center px-5 py-3.5 bg-surface/95 backdrop-blur-md z-40 sticky top-0">
+<div class="flex items-center gap-2.5">
+<span aria-hidden="true" class="material-symbols-outlined text-[20px] text-primary-container font-light">coffee</span>
+<span class="font-title-serif text-[17px] tracking-tight font-medium text-on-surface">Kyle's Morning Drive</span>
+</div>
+<div class="flex gap-2 items-center">
+<button aria-label="Settings" class="p-1.5 text-on-surface-variant hover:text-on-surface transition-colors rounded-sm hover:bg-surface-container-high">
+<span class="material-symbols-outlined text-[19px] block">tune</span>
+</button>
+</div>
+</header>
+<!-- Main Content Canvas -->
+<main class="w-full max-w-[640px] mx-auto p-5 sm:p-7 flex flex-col gap-8">
+<!-- Hero Card: Today's Drive -->
+<section class="relative w-full bg-surface-container-low border border-outline-variant rounded-md p-6 overflow-hidden">
+<div class="relative z-10 flex flex-col gap-6">
+<!-- Top: Title and Status -->
+<div class="flex flex-col gap-1.5">
+<div class="flex items-center justify-between">
+<h2 class="font-headline-lg text-[32px] sm:text-[34px] leading-tight text-on-surface font-normal tracking-tight font-title-serif">Today's Drive</h2>
+<div class="flex items-center gap-1.5 text-primary-container text-xs tracking-wider uppercase font-code-meta">
+<span class="w-1.5 h-1.5 rounded-full bg-primary-container animate-pulse"></span>
+<span>Ready</span>
+</div>
+</div>
+<p class="text-xs font-label-md text-on-surface-variant tracking-wide uppercase">Curated offline audio edition</p>
+</div>
+<!-- Middle: Stats with Vertical Hierarchy -->
+<div class="grid grid-cols-2 gap-4 py-4 border-y border-outline-variant/60">
+<div class="flex flex-col">
+<span class="text-on-surface font-title-serif text-[28px] leading-none font-normal">7<span class="text-base text-on-surface-variant font-code-meta ml-0.5 mr-2">h</span>7<span class="text-base text-on-surface-variant font-code-meta ml-0.5">m</span></span>
+<span class="text-on-surface-variant text-[11px] uppercase tracking-wider font-code-meta mt-1.5">Total Duration</span>
+</div>
+<div class="flex flex-col border-l border-outline-variant/40 pl-4">
+<span class="text-on-surface font-title-serif text-[28px] leading-none font-normal">17</span>
+<span class="text-on-surface-variant text-[11px] uppercase tracking-wider font-code-meta mt-1.5">Queued Articles</span>
+</div>
+</div>
+<!-- Bottom: Actions -->
+<div class="flex flex-col gap-2.5">
+<button class="bg-primary-container hover:bg-[#b5834a] active:bg-[#a6773f] text-[#1c1307] transition-colors rounded-sm px-5 py-3 font-medium text-[14px] flex items-center justify-center gap-2 tracking-wide w-full shadow-sm">
+<span class="material-symbols-outlined text-[19px]" style="font-variation-settings: 'FILL' 1;">play_arrow</span>
+<span>Generate Audio Edition</span>
+</button>
+<button class="bg-surface-container-high/60 hover:bg-surface-container-high text-on-surface-variant hover:text-on-surface border border-outline-variant/70 rounded-sm px-4 py-2.5 text-xs font-code-meta flex items-center justify-center gap-1.5 tracking-wider uppercase transition-colors w-full">
+<span class="material-symbols-outlined text-[15px]">auto_stories</span>
+<span>+ 10 Random Articles</span>
+</button>
+</div>
+</div>
+</section>
+<!-- Queue Section -->
+<section class="flex flex-col gap-4">
+<header class="flex justify-between items-baseline pb-2 border-b border-outline-variant">
+<div class="flex items-baseline gap-2.5">
+<h3 class="font-title-serif text-[22px] font-normal text-on-surface">Queue</h3>
+<span class="text-xs font-code-meta text-on-surface-variant">2 pending</span>
+</div>
+<button class="text-on-surface-variant hover:text-on-surface text-[11px] font-code-meta uppercase tracking-wider flex items-center gap-1 transition-colors">
+<span class="material-symbols-outlined text-[14px]">clear_all</span>
+          Clear Staged
+        </button>
+</header>
+<!-- Filters & Search -->
+<div class="flex flex-col gap-3">
+<div class="relative">
+<span class="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-on-surface-variant/70 text-[18px]">search</span>
+<input class="w-full bg-surface-container-low border border-outline-variant pl-9 pr-3.5 py-2 text-on-surface text-[13px] font-body-ui placeholder:text-on-surface-variant/60 focus:outline-none focus:border-primary-container/80 rounded-sm transition-colors" placeholder="Filter articles by title or domain..." type="text"/>
+</div>
+<div class="flex gap-1.5 overflow-x-auto pb-1 scrollbar-none">
+<button class="shrink-0 px-3 py-1 text-[11px] font-code-meta tracking-wider uppercase rounded-sm border border-outline-variant text-on-surface-variant hover:text-on-surface hover:bg-surface-container-high transition-colors">Staged</button>
+<button class="shrink-0 px-3 py-1 text-[11px] font-code-meta tracking-wider uppercase rounded-sm border border-outline-variant text-on-surface-variant hover:text-on-surface hover:bg-surface-container-high transition-colors">Generating</button>
+<button class="shrink-0 px-3 py-1 text-[11px] font-code-meta tracking-wider uppercase rounded-sm border border-primary-container/80 bg-primary-container/15 text-primary font-medium">Done</button>
+<button class="shrink-0 px-3 py-1 text-[11px] font-code-meta tracking-wider uppercase rounded-sm border border-outline-variant text-on-surface-variant hover:text-on-surface hover:bg-surface-container-high transition-colors">Failed</button>
+</div>
+</div>
+<!-- Queue List -->
+<div class="divide-y divide-outline-variant/60 border-y border-outline-variant/60">
+<!-- Item 1 -->
+<article class="py-4 flex items-start justify-between gap-4 group">
+<div class="flex flex-col gap-2 flex-1">
+<h4 class="font-headline-md text-[17px] leading-[1.4] text-on-surface font-normal group-hover:text-primary transition-colors cursor-pointer">
+              He couldn't get over his fiancée's death. So he brought her back as an A.I. chatbot
+            </h4>
+<div class="flex flex-wrap items-center gap-x-3 gap-y-1 text-on-surface-variant text-[12px] font-code-meta">
+<span class="flex items-center gap-1 text-on-surface-variant/80">
+<span class="material-symbols-outlined text-[13px]">public</span> sfchronicle.com
+              </span>
+<span class="text-outline-variant">•</span>
+<span class="flex items-center gap-1">
+<span class="material-symbols-outlined text-[13px]">schedule</span> 53 min
+              </span>
+<span class="text-outline-variant">•</span>
+<span class="text-[10px] text-primary-container uppercase tracking-wider font-semibold">Done</span>
+</div>
+</div>
+<div class="flex items-center gap-1 shrink-0 pt-0.5">
+<button aria-label="Archive" class="p-1.5 text-on-surface-variant/70 hover:text-on-surface hover:bg-surface-container-high rounded-sm transition-colors" title="Archive">
+<span class="material-symbols-outlined text-[18px] block">inventory_2</span>
+</button>
+<button aria-label="Delete" class="p-1.5 text-on-surface-variant/70 hover:text-error hover:bg-surface-container-high rounded-sm transition-colors" title="Delete">
+<span class="material-symbols-outlined text-[18px] block">delete</span>
+</button>
+</div>
+</article>
+<!-- Item 2 -->
+<article class="py-4 flex items-start justify-between gap-4 group">
+<div class="flex flex-col gap-2 flex-1">
+<h4 class="font-headline-md text-[17px] leading-[1.4] text-on-surface font-normal group-hover:text-primary transition-colors cursor-pointer">
+              Pnin Gives a Party
+            </h4>
+<div class="flex flex-wrap items-center gap-x-3 gap-y-1 text-on-surface-variant text-[12px] font-code-meta">
+<span class="flex items-center gap-1 text-on-surface-variant/80">
+<span class="material-symbols-outlined text-[13px]">public</span> newyorker.com
+              </span>
+<span class="text-outline-variant">•</span>
+<span class="flex items-center gap-1">
+<span class="material-symbols-outlined text-[13px]">schedule</span> 38 min
+              </span>
+<span class="text-outline-variant">•</span>
+<span class="text-[10px] text-primary-container uppercase tracking-wider font-semibold">Done</span>
+</div>
+</div>
+<div class="flex items-center gap-1 shrink-0 pt-0.5">
+<button aria-label="Archive" class="p-1.5 text-on-surface-variant/70 hover:text-on-surface hover:bg-surface-container-high rounded-sm transition-colors" title="Archive">
+<span class="material-symbols-outlined text-[18px] block">inventory_2</span>
+</button>
+<button aria-label="Delete" class="p-1.5 text-on-surface-variant/70 hover:text-error hover:bg-surface-container-high rounded-sm transition-colors" title="Delete">
+<span class="material-symbols-outlined text-[18px] block">delete</span>
+</button>
+</div>
+</article>
+</div>
+</section>
+</main>
+</body></html>
