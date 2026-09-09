@@ -8,12 +8,16 @@
     return;
   }
 
+  var guidEl = document.querySelector("[data-podcast-guid]");
+  var statusUrl =
+    "/queue/status" + (guidEl ? "?podcast=" + encodeURIComponent(guidEl.dataset.podcastGuid) : "");
+
   var doneEl = document.getElementById("progress-done");
   var totalEl = document.getElementById("progress-total");
 
   async function poll() {
     try {
-      var resp = await fetch("/queue/status", { headers: { Accept: "application/json" } });
+      var resp = await fetch(statusUrl, { headers: { Accept: "application/json" } });
       if (!resp.ok) {
         return;
       }
@@ -62,6 +66,17 @@
   }
 
   setInterval(poll, 2000);
+})();
+
+/* Keep the active podcast tab in view on load so a freshly created rightmost
+ * tab that sits outside the scrollable strip is still visible. */
+(function () {
+  "use strict";
+
+  var tab = document.querySelector(".podcast-tab.active");
+  if (tab) {
+    tab.scrollIntoView({ block: "nearest", inline: "nearest" });
+  }
 })();
 
 /* Live queue filtering: title search + status pills hide/show rows entirely
@@ -182,6 +197,11 @@
             body.textContent = data.error || "Something went wrong.";
           }
           overlay.hidden = false;
+          return;
+        }
+        var redirect = form.getAttribute("data-redirect");
+        if (redirect) {
+          window.location.href = redirect;
           return;
         }
         if (isDelete && queueItem) {
