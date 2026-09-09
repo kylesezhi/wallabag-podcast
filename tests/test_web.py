@@ -34,6 +34,7 @@ def env(tmp_path, monkeypatch):
         monkeypatch.setenv(key, value)
     monkeypatch.setenv("DATA_DIR", str(tmp_path))
     monkeypatch.setenv("KOKORO_BASE_URL", "http://kokoro.test")
+    monkeypatch.setenv("KOKORO_DEFAULT_VOICE", "af_heart")
     monkeypatch.setenv("WALLABAG_URL", "https://wallabag.test")
     get_settings.cache_clear()
     init_db(get_db_path())
@@ -650,9 +651,14 @@ def test_generate_starts(client, monkeypatch):
     assert "generating" in response.headers["location"]
 
 
-def test_generate_retries_failed_only_queue(client):
+def test_generate_retries_failed_only_queue(client, monkeypatch):
     with sqlite3.connect(get_db_path()) as conn:
         _insert_failed(conn, 7, "Broken Article")
+
+    async def mock_generate_all(wallabag_client, kokoro_client, settings):
+        return {"total": 0, "done": 0, "failed": 0, "skipped": 0}
+
+    monkeypatch.setattr("app.main.generate_all", mock_generate_all)
 
     response = client.post("/queue/generate", follow_redirects=False)
 
