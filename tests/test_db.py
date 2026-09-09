@@ -121,9 +121,9 @@ def test_get_podcasts_aggregates(conn):
     _insert_episode(conn, podcast_b["id"], 5, "done", duration_sec=1800)
 
     podcasts = get_podcasts(conn)
-    # Newest first: podcast_b (created after podcast_a) precedes podcast_a.
-    assert podcasts[0]["id"] == podcast_b["id"]
-    assert podcasts[1]["id"] == podcast_a["id"]
+    # Creation order: podcast_a (created before podcast_b) precedes podcast_b.
+    ids = [p["id"] for p in podcasts]
+    assert ids.index(podcast_a["id"]) < ids.index(podcast_b["id"])
 
     by_id = {p["id"]: p for p in podcasts}
     a = by_id[podcast_a["id"]]

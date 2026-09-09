@@ -237,7 +237,7 @@ def get_newest_podcast(conn: sqlite3.Connection) -> dict | None:
 
 
 def get_podcasts(conn: sqlite3.Connection) -> list[dict]:
-    """Return every podcast with per-podcast episode aggregates, newest first.
+    """Return every podcast with per-podcast episode aggregates, oldest first.
 
     Keys: id, guid, name, created_at, staged, generating, done, failed,
     staged_minutes, done_seconds. Podcasts with zero episodes appear with zeros.
@@ -254,7 +254,7 @@ def get_podcasts(conn: sqlite3.Connection) -> list[dict]:
         "COALESCE(SUM(CASE WHEN e.status='done' THEN e.duration_sec ELSE 0 END), 0) "
         "AS done_seconds "
         "FROM podcasts p LEFT JOIN episodes e ON e.podcast_id=p.id "
-        "GROUP BY p.id ORDER BY p.id DESC"
+        "GROUP BY p.id ORDER BY p.id ASC"
     ).fetchall()
     return [
         {
