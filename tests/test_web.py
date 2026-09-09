@@ -276,11 +276,12 @@ def test_home_zero_podcasts_renders_empty_hub(client):
     response = client.get("/")
 
     assert response.status_code == 200
-    assert "Today" in response.text
-    assert "Drive" in response.text
-    assert "Add 10 Random Articles" in response.text
-    assert "Generate" in response.text
-    assert "No articles" in response.text.lower() or "empty" in response.text.lower()
+    # Empty hub CTA replaces the single-podcast drive hero.
+    assert "No podcasts yet" in response.text
+    assert "New Podcast" in response.text
+    assert 'action="/podcasts/create"' in response.text
+    assert "Active Podcast" not in response.text
+    assert "podcast-tab" not in response.text
 
 
 def test_home_shows_queue(client):
@@ -406,6 +407,42 @@ def test_podcast_hub_unknown_guid_404(client):
     assert response.status_code == 404
 
 
+def test_hub_shows_tabs_hero_other_podcasts_and_subscription(client):
+    podcast = _podcast()
+    with sqlite3.connect(get_db_path()) as conn:
+        other = create_podcast(conn)
+        _insert_done(conn, 1, "Done Episode", podcast_id=podcast["id"])
+        _insert_staged(conn, [(2, "Staged Episode")], podcast_id=other["id"])
+
+    response = client.get(f"/podcast/{podcast['guid']}")
+
+    assert response.status_code == 200
+    # Hero shows the active podcast's name under the Active Podcast label.
+    assert "Active Podcast" in response.text
+    assert podcast["name"] in response.text
+    assert f'data-podcast-guid="{podcast["guid"]}"' in response.text
+    # Header tabs render one pill per podcast, each with a count badge; the
+    # active podcast's pill is marked.
+    assert response.text.count('<a class="podcast-tab') == 2
+    assert f'href="/podcast/{podcast["guid"]}"' in response.text
+    assert f'href="/podcast/{other["guid"]}"' in response.text
+    assert '<a class="podcast-tab active"' in response.text
+    assert "podcast-tab-count" in response.text
+    # The non-active podcast appears under Other Managed Podcasts with a
+    # Switch link and a scoped delete form carrying the new data-redirect hook.
+    assert "Other Managed Podcasts" in response.text
+    assert other["name"] in response.text
+    assert f'href="/podcast/{other["guid"]}"' in response.text
+    assert f'action="/podcast/{other["guid"]}/delete"' in response.text
+    assert 'data-redirect="/"' in response.text
+    # Subscription card shows the per-podcast GUID feed URL + copy target.
+    assert f"/podcast/{podcast['guid']}/feed.xml" in response.text
+    assert (
+        f'data-copy-url="{get_settings().BASE_URL}/podcast/{podcast["guid"]}/feed.xml"'
+        in response.text
+    )
+
+
 def test_create_podcast(client):
     response = client.post("/podcasts/create", follow_redirects=False)
 
@@ -452,6 +489,21 @@ def test_delete_podcast_without_run(client, env):
             conn.execute("SELECT COUNT(*) FROM processed_articles").fetchone()[0] == 0
         )
     assert audio_path.exists() is False
+
+
+def test_delete_podcast_returns_json_for_ajax(client):
+    podcast = _podcast()
+
+    response = client.post(
+        f"/podcast/{podcast['guid']}/delete",
+        headers={"Accept": "application/json"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["ok"] is True
+    assert "Deleted podcast" in response.json()["message"]
+    with sqlite3.connect(get_db_path()) as conn:
+        assert get_newest_podcast(conn) is None
 
 
 async def test_delete_podcast_with_active_run_cancels_and_removes(client, env):
@@ -1420,8 +1472,12 @@ def test_clear_staged_form_has_confirmation(client):
 
         assert response.status_code == 200
         # Clear Staged shares the confirmation modal; its copy spells out
-        # that failed rows go too and done rows survive.
-        assert 'action="/queue/clear" data-confirm-message' in response.text
+        # that failed rows go too and done rows survive. The action is now
+        # scoped to the active podcast.
+        assert (
+            f'action="/podcast/{podcast["guid"]}/queue/clear" data-confirm-message'
+            in response.text
+        )
         assert "staged and failed episodes" in response.text
         assert "Done episodes are kept" in response.text
         assert 'data-confirm-label="Clear"' in response.text

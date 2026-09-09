@@ -1,16 +1,40 @@
 {% extends "base.html" %}
+{% block header_tabs %}
+{% if podcasts %}
+<div class="header-tabs">
+  <span class="header-tabs-divider" aria-hidden="true"></span>
+  <nav class="podcast-tabs" aria-label="Podcasts">
+    {% for p in podcasts %}
+    <a class="podcast-tab{% if p.guid == podcast.guid %} active{% endif %}" href="/podcast/{{ p.guid }}">
+      <span class="podcast-tab-dot" aria-hidden="true"></span>
+      <span class="podcast-tab-name">{{ p.name }}</span>
+      <span class="podcast-tab-count">{{ p.staged + p.generating + p.done + p.failed }}</span>
+    </a>
+    {% endfor %}
+  </nav>
+  <form method="post" action="/podcasts/create" class="header-new-podcast">
+    <button type="submit" class="new-podcast-btn" title="New Podcast">
+      <span class="material-symbols-outlined" aria-hidden="true">add</span>
+      <span class="new-podcast-label">New Podcast</span>
+    </button>
+  </form>
+</div>
+{% endif %}
+{% endblock %}
 {% block content %}
-<div class="home-grid">
+{% if podcast %}
+<div class="home-grid" data-podcast-guid="{{ podcast.guid }}">
   <section class="drive-column">
     <div class="card drive-card">
       <div class="drive-card-tint" aria-hidden="true"></div>
-      <h1 class="drive-title">Today's Drive</h1>
+      <p class="hero-label">Active Podcast</p>
+      <h1 class="drive-title">{{ podcast.name }}</h1>
       <p class="drive-status">
         <span class="drive-status-dot" aria-hidden="true"></span>
-        {% if generating %}Generating your drive&hellip;
+        {% if generating %}Generating&hellip;
         {% elif stats.staged + stats.failed > 0 %}Ready to generate
         {% elif stats.done > 0 %}Ready to listen
-        {% else %}Your queue is empty{% endif %}
+        {% else %}No episodes yet{% endif %}
       </p>
       <div class="drive-stats">
         <div class="stat">
@@ -20,17 +44,17 @@
         <div class="stat-divider" aria-hidden="true"></div>
         <div class="stat">
           <span class="stat-value">{{ stats.articles }}</span>
-          <span class="stat-label">Articles</span>
+          <span class="stat-label">Episodes</span>
         </div>
       </div>
-      <form method="post" action="/queue/generate">
+      <form method="post" action="/podcast/{{ podcast.guid }}/queue/generate">
         {% if generating %}
         <button type="submit" class="btn btn-primary btn-block" disabled aria-busy="true"><span class="spinner" aria-hidden="true"></span>Generating&hellip;</button>
         {% else %}
         <button type="submit" class="btn btn-primary btn-block">Generate Audio</button>
         {% endif %}
       </form>
-      <form method="post" action="/queue/add-random">
+      <form method="post" action="/podcast/{{ podcast.guid }}/queue/add-random">
         <button type="submit" class="btn btn-secondary btn-block">Add {{ articles_per_drive }} Random Articles</button>
       </form>
     </div>
@@ -49,9 +73,12 @@
     {% endif %}
 
     <div class="queue-header">
-      <h2>Queue</h2>
+      <div class="queue-header-titles">
+        <h2>Episodes for {{ podcast.name }}</h2>
+        <span class="queue-meta">{{ stats.staged }} queued &bull; {{ stats.done }} ready{% if stats.failed > 0 %} &bull; {{ stats.failed }} failed{% endif %}</span>
+      </div>
       <div class="queue-actions">
-        <form method="post" action="/queue/clear" data-confirm-message="Remove all staged and failed episodes from the queue? Done episodes are kept." data-confirm-label="Clear">
+        <form method="post" action="/podcast/{{ podcast.guid }}/queue/clear" data-confirm-message="Remove all staged and failed episodes from the queue? Done episodes are kept." data-confirm-label="Clear">
           <button type="submit" class="btn btn-outline">Clear Staged</button>
         </form>
       </div>
@@ -112,18 +139,40 @@
       <p>No articles in the queue yet — it's empty. Use <strong>Add {{ articles_per_drive }} Random Articles</strong> to stage a few articles.</p>
     </div>
     {% endif %}
+
+    {% if podcasts|length > 1 %}
+    <section class="other-podcasts">
+      <h3 class="other-podcasts-label">Other Managed Podcasts</h3>
+      <div class="other-podcasts-grid">
+        {% for p in podcasts if p.guid != podcast.guid %}
+        <div class="other-podcast-card">
+          <div class="other-podcast-info">
+            <h4 class="other-podcast-name">{{ p.name }}</h4>
+            <p class="other-podcast-meta">{{ p.staged + p.generating + p.done + p.failed }} episodes &bull; {{ (p.staged_minutes + p.done_seconds // 60) | human_duration }} &bull; {% if p.generating > 0 %}Generating&hellip;{% elif p.staged + p.failed > 0 %}Ready to generate{% elif p.done > 0 %}Ready to listen{% else %}No episodes yet{% endif %}</p>
+          </div>
+          <div class="other-podcast-actions">
+            <a class="btn btn-secondary btn-sm" href="/podcast/{{ p.guid }}">Switch</a>
+            <form method="post" action="/podcast/{{ p.guid }}/delete" data-confirm-message="Removes the feed and all {{ p.staged + p.generating + p.done + p.failed }} episodes." data-confirm-label="Delete Podcast" data-redirect="/">
+              <button type="submit" class="btn-delete" title="Delete {{ p.name }}" aria-label="Delete {{ p.name }}"><span class="material-symbols-outlined" aria-hidden="true">delete</span></button>
+            </form>
+          </div>
+        </div>
+        {% endfor %}
+      </div>
+    </section>
+    {% endif %}
   </section>
 
   <aside class="info-column">
     <div class="card podcast-card">
-      <h2 class="section-heading">Podcast</h2>
+      <h2 class="section-heading">Podcast Subscription</h2>
       <dl class="podcast-meta">
-        <dt>Feed</dt>
-        <dd><a href="/feed.xml">{{ feed_title }}</a></dd>
-        <dt>Subscribe URL</dt>
+        <dt>Feed Name</dt>
+        <dd>{{ podcast.name }}</dd>
+        <dt>Personal RSS Feed</dt>
         <dd class="subscribe-url">
-          <code>{{ base_url }}/feed.xml</code>
-          <button type="button" class="btn-copy" data-copy-url="{{ base_url }}/feed.xml" title="Copy subscribe URL" aria-label="Copy subscribe URL">
+          <code>{{ base_url }}/podcast/{{ podcast.guid }}/feed.xml</code>
+          <button type="button" class="btn-copy" data-copy-url="{{ base_url }}/podcast/{{ podcast.guid }}/feed.xml" title="Copy subscribe URL" aria-label="Copy subscribe URL">
             <svg class="icon-copy" aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
               <rect x="9" y="9" width="13" height="13" rx="2"></rect>
               <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
@@ -135,6 +184,10 @@
         </dd>
       </dl>
       <p class="podcast-hint">Add this URL to your podcast app. Set <code>BASE_URL</code> to your LAN address to listen from your phone.</p>
+      <form method="post" action="/podcast/{{ podcast.guid }}/delete" class="podcast-delete-form" data-confirm-message="Removes the feed and all {{ stats.articles }} episodes." data-confirm-label="Delete Podcast" data-redirect="/">
+        <button type="submit" class="btn btn-stop btn-block">Delete Podcast</button>
+      </form>
+      <p class="podcast-delete-hint">Removes feed and all {{ stats.articles }} episodes</p>
     </div>
     <section class="card waveform-card">
       <div class="waveform-bars" aria-hidden="true">
@@ -151,6 +204,16 @@
     </section>
   </aside>
 </div>
+{% else %}
+<div class="empty-state">
+  <div class="empty-state-icon" aria-hidden="true"><span class="material-symbols-outlined">auto_stories</span></div>
+  <h1 class="empty-state-title">No podcasts yet</h1>
+  <p class="empty-state-text">Create your first podcast feed to turn saved articles into audio.</p>
+  <form method="post" action="/podcasts/create">
+    <button type="submit" class="btn btn-primary"><span class="material-symbols-outlined" aria-hidden="true">add</span>New Podcast</button>
+  </form>
+</div>
+{% endif %}
 
 <div class="modal-overlay" id="delete-modal" hidden>
   <div class="modal" role="dialog" aria-modal="true" aria-labelledby="delete-modal-title">

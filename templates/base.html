@@ -15,9 +15,10 @@
   <header class="site-header">
     <div class="site-header-inner">
       <a class="brand" href="/">
-        <span class="brand-logo" aria-hidden="true"><span class="material-symbols-outlined" aria-hidden="true">coffee</span></span>
+        <span class="brand-logo" aria-hidden="true"><span class="material-symbols-outlined" aria-hidden="true">auto_stories</span></span>
         <span class="brand-name">{{ feed_title }}</span>
       </a>
+      {% block header_tabs %}{% endblock %}
       <nav class="site-nav">
         <a class="nav-gear" href="/settings" title="Settings" aria-label="Settings"><span class="material-symbols-outlined" aria-hidden="true">tune</span></a>
       </nav>
@@ -33,7 +34,7 @@
 
   <footer class="site-footer">
     <div class="footer-inner">
-      <span class="footer-brand">{{ feed_title }} — Personal Digest</span>
+      <span class="footer-brand">{{ feed_title }} — Multi-Podcast Engine</span>
       <span class="footer-note">Personal audio edition</span>
     </div>
   </footer>

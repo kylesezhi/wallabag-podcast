@@ -1625,3 +1625,378 @@ a.queue-item-title:hover {
     text-align: center;
   }
 }
+/* --- Header podcast tabs ------------------------------------------------------- */
+
+.header-tabs {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex: 1;
+  min-width: 0;
+}
+
+.header-tabs-divider {
+  width: 1px;
+  height: 1.25rem;
+  background: var(--hairline);
+  flex-shrink: 0;
+}
+
+.podcast-tabs {
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+  overflow-x: auto;
+  min-width: 0;
+  padding: 0.25rem 0;
+  scrollbar-width: none;
+}
+
+.podcast-tabs::-webkit-scrollbar {
+  display: none;
+}
+
+.podcast-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.375rem 0.75rem;
+  border: 1px solid transparent;
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--ink-muted);
+  font-size: 0.75rem;
+  font-weight: 500;
+  white-space: nowrap;
+  text-decoration: none;
+  transition: background-color 150ms ease, border-color 150ms ease, color 150ms ease;
+}
+
+.podcast-tab:hover {
+  background: var(--surface-raised);
+  color: var(--ink);
+  text-decoration: none;
+}
+
+.podcast-tab.active {
+  background: #252424;
+  border-color: var(--accent-border);
+  color: var(--accent-bright);
+}
+
+.podcast-tab-dot {
+  width: 0.375rem;
+  height: 0.375rem;
+  border-radius: 50%;
+  background: #474543; /* dim gray, inactive */
+  flex-shrink: 0;
+}
+
+.podcast-tab.active .podcast-tab-dot {
+  background: var(--accent-bright);
+}
+
+.podcast-tab-count {
+  font-family: var(--font-mono);
+  font-size: 0.625rem;
+  line-height: 1.25rem;
+  color: #7a756f;
+  background: var(--ground);
+  border-radius: var(--radius-sm);
+  padding: 0 0.375rem;
+  white-space: nowrap;
+}
+
+.podcast-tab.active .podcast-tab-count {
+  color: var(--ink-muted);
+}
+
+.header-new-podcast {
+  margin: 0;
+  flex-shrink: 0;
+}
+
+.new-podcast-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  padding: 0.375rem 0.75rem;
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--ink-soft);
+  font-family: var(--font-ui);
+  font-size: 0.75rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background-color 150ms ease, border-color 150ms ease, color 150ms ease;
+}
+
+.new-podcast-btn:hover {
+  background: #252424;
+  color: var(--ink);
+}
+
+.new-podcast-btn .material-symbols-outlined {
+  font-size: 1rem;
+  color: var(--accent);
+}
+
+/* --- Hero label + status ping --------------------------------------------------- */
+
+.hero-label {
+  margin: 0 0 0.25rem;
+  font-family: var(--font-mono);
+  font-size: 0.6875rem;
+  font-weight: 400;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-muted);
+}
+
+/* Ping halo behind the solid amber dot on the hero status line. */
+.drive-status-dot {
+  position: relative;
+}
+
+.drive-status-dot::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  background: var(--accent);
+  animation: statusPing 2s cubic-bezier(0, 0, 0.2, 1) infinite;
+  pointer-events: none;
+}
+
+@keyframes statusPing {
+  0% {
+    transform: scale(1);
+    opacity: 0.75;
+  }
+  80%, 100% {
+    transform: scale(2.2);
+    opacity: 0;
+  }
+}
+
+/* Desktop hero: label above the title, status below it, stats + buttons keep
+ * their columns. Overrides the pre-hub drive-card grid rows. */
+@media (min-width: 1024px) {
+  .drive-card .hero-label {
+    grid-column: 1;
+    grid-row: 1;
+    align-self: end;
+    margin-bottom: 0;
+  }
+
+  .drive-card .drive-title {
+    grid-row: 2;
+  }
+
+  .drive-card .drive-status {
+    grid-row: 3;
+  }
+
+  .drive-card .drive-stats {
+    grid-row: 1 / span 3;
+  }
+}
+
+/* --- Episodes section header ---------------------------------------------------- */
+
+.queue-header-titles {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  min-width: 0;
+}
+
+.queue-meta {
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  color: var(--ink-muted);
+  white-space: nowrap;
+}
+
+/* --- Other Managed Podcasts ----------------------------------------------------- */
+
+.other-podcasts {
+  margin-top: 2rem;
+}
+
+.other-podcasts-label {
+  margin: 0 0 0.75rem;
+  font-family: var(--font-ui);
+  font-size: 0.7rem;
+  font-weight: 500;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-muted);
+}
+
+.other-podcasts-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(16rem, 1fr));
+  gap: 0.75rem;
+}
+
+.other-podcast-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  background: var(--surface);
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius);
+  padding: 1rem;
+  transition: border-color 150ms ease;
+}
+
+.other-podcast-card:hover {
+  border-color: var(--hairline-strong);
+}
+
+.other-podcast-info {
+  min-width: 0;
+}
+
+.other-podcast-name {
+  margin: 0 0 0.25rem;
+  font-family: var(--font-serif);
+  font-size: 1rem;
+  font-weight: 500;
+  color: var(--ink);
+}
+
+.other-podcast-meta {
+  margin: 0;
+  font-size: 0.75rem;
+  color: var(--ink-faint);
+}
+
+.other-podcast-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-shrink: 0;
+}
+
+.other-podcast-actions form {
+  margin: 0;
+}
+
+.btn-sm {
+  padding: 0.25rem 0.625rem;
+  font-size: 0.75rem;
+}
+
+/* --- Subscription card delete form ---------------------------------------------- */
+
+.podcast-delete-form {
+  margin: 1rem 0 0;
+  padding-top: 1rem;
+  border-top: 1px solid var(--hairline);
+}
+
+.podcast-delete-hint {
+  margin: 0.5rem 0 0;
+  text-align: center;
+  font-family: var(--font-mono);
+  font-size: 0.625rem;
+  color: var(--ink-faint);
+}
+
+/* --- Empty hub CTA --------------------------------------------------------------- */
+
+.empty-state {
+  max-width: 26rem;
+  margin: 3rem auto;
+  padding: 2.5rem 1.5rem;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.75rem;
+  text-align: center;
+  background: var(--surface);
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius);
+}
+
+.empty-state-icon {
+  width: 3rem;
+  height: 3rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  background: var(--accent-wash);
+  border: 1px solid var(--accent-border);
+  color: var(--accent-bright);
+}
+
+.empty-state-title {
+  margin: 0;
+  font-family: var(--font-serif);
+  font-size: 1.5rem;
+  font-weight: 400;
+  color: var(--ink);
+}
+
+.empty-state-text {
+  margin: 0;
+  color: var(--ink-muted);
+  font-size: 0.875rem;
+}
+
+.empty-state form {
+  margin: 0.5rem 0 0;
+}
+
+.empty-state .btn {
+  padding: 0.625rem 1.25rem;
+  font-size: 0.9rem;
+}
+
+.empty-state .btn .material-symbols-outlined {
+  font-size: 1.125rem;
+}
+
+/* --- Reduced motion for the new ping halo ---------------------------------------- */
+
+@media (prefers-reduced-motion: reduce) {
+  .drive-status-dot::after {
+    animation: none;
+  }
+}
+
+/* --- Hub small screens ----------------------------------------------------------- */
+
+@media (max-width: 640px) {
+  .header-tabs-divider {
+    display: none;
+  }
+
+  /* Icon-only brand makes room for the scrolling tab pills (mobile reference). */
+  .brand-name {
+    display: none;
+  }
+
+  .header-tabs {
+    gap: 0.5rem;
+  }
+
+  .podcast-tab {
+    padding: 0.3rem 0.625rem;
+  }
+
+  .new-podcast-btn {
+    padding: 0.3rem 0.625rem;
+  }
+
+  .other-podcast-card {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+}

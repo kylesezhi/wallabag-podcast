@@ -434,7 +434,7 @@ async def podcasts_create():
 
 
 @app.post("/podcast/{guid}/delete")
-async def podcast_delete(guid: str):
+async def podcast_delete(request: Request, guid: str):
     podcast = _get_podcast_or_404(guid)
     if (
         getattr(app.state, "generating", False)
@@ -444,8 +444,8 @@ async def podcast_delete(guid: str):
         if task is not None and not task.done():
             task.cancel()
     result = delete_podcast(podcast["id"])
-    return _redirect(
-        "/", message=f"Deleted podcast {result['name']} ({result['episode_count']} episodes)"
+    return _json_or_redirect(
+        request, "/", message=f"Deleted podcast {result['name']} ({result['episode_count']} episodes)"
     )
 
 
