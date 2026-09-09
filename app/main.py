@@ -2,13 +2,14 @@
 
 Lifespan initializes the SQLite database, the audio directory, and shared
 Wallabag/Kokoro clients (stored on ``app.state`` so tests can swap in mocks).
-Serves the server-rendered web UI (queue + settings), the queue action routes,
-a JSON polling endpoint used during generation, and the podcast RSS feed at
-``/feed.xml``.
+Serves the multi-podcast hub (one page per podcast, indexed by GUID), the
+scoped queue action routes, a JSON polling endpoint used during generation,
+and one RSS feed per podcast at ``/podcast/{guid}/feed.xml``.
 
 Long-running generation runs as an asyncio task (handle on
 ``app.state.generation_task``) so it can be cancelled via POST /queue/stop;
-progress is written to SQLite and the UI polls ``/queue/status``.
+only one run exists at a time, processing the triggering podcast's staged
+episodes. Progress is written to SQLite and the UI polls ``/queue/status``.
 """
 
 from __future__ import annotations
@@ -19,7 +20,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from urllib.parse import urlencode
 
-from fastapi import FastAPI, Request, Response
+from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -27,8 +28,12 @@ from fastapi.templating import Jinja2Templates
 from .config import get_settings
 from .db import (
     connect,
+    create_podcast,
     get_db_path,
     get_episode_status,
+    get_newest_podcast,
+    get_podcast_by_guid,
+    get_podcasts,
     get_queue_episodes,
     get_setting,
     has_staged_episodes,
@@ -43,6 +48,7 @@ from .pipeline import (
     archive_item,
     clear_queue,
     delete_item,
+    delete_podcast,
     generate_all,
     stats,
 )
@@ -115,6 +121,7 @@ async def lifespan(app: FastAPI):
     app.state.wallabag_client = WallabagClient(settings)
     app.state.kokoro_client = KokoroClient(settings)
     app.state.generating = False
+    app.state.generating_podcast_id = None
     app.state.generation_task = None
     try:
         yield
@@ -166,24 +173,74 @@ def _json_or_redirect(request: Request, path: str, *, message: str | None = None
     return _redirect(path, message=message, error=error)
 
 
-async def _run_generation(app: FastAPI) -> None:
-    """Background task: generate audio for all staged episodes.
+def _get_podcast_or_404(guid: str) -> dict:
+    """Return the podcast record for a guid, raising 404 when unknown."""
+    conn = connect()
+    try:
+        podcast = get_podcast_by_guid(conn, guid)
+    finally:
+        conn.close()
+    if podcast is None:
+        raise HTTPException(status_code=404, detail="Podcast not found")
+    return podcast
 
-    Flips ``app.state.generating`` so the UI can poll /queue/status for live
-    progress. Uses the shared clients (tests patch ``generate_all`` itself).
+
+def _owner_podcast_path(episode_id: int) -> str:
+    """Hub path of the podcast that owns an episode; '/' when unowned.
+
+    Falls back to the root (which redirects to the newest podcast) when the
+    episode is missing, has no podcast, or its podcast row no longer exists.
+    """
+    conn = connect()
+    try:
+        row = conn.execute(
+            "SELECT podcast_id FROM episodes WHERE id=?", (episode_id,)
+        ).fetchone()
+        if row is None or row[0] is None:
+            return "/"
+        guid = conn.execute(
+            "SELECT guid FROM podcasts WHERE id=?", (row[0],)
+        ).fetchone()
+        return f"/podcast/{guid[0]}" if guid is not None else "/"
+    finally:
+        conn.close()
+
+
+def _generating_podcast_path() -> str:
+    """Hub path of the podcast the active run belongs to; '/' when unknown."""
+    podcast_id = getattr(app.state, "generating_podcast_id", None)
+    if podcast_id is None:
+        return "/"
+    conn = connect()
+    try:
+        row = conn.execute("SELECT guid FROM podcasts WHERE id=?", (podcast_id,)).fetchone()
+    finally:
+        conn.close()
+    return f"/podcast/{row[0]}" if row is not None else "/"
+
+
+async def _run_generation(app: FastAPI, podcast_id: int | None) -> None:
+    """Background task: generate audio for a podcast's staged episodes.
+
+    Flips ``app.state.generating`` (and records which podcast the run belongs
+    to) so the UI can poll /queue/status for live progress. Uses the shared
+    clients (tests patch ``generate_all`` itself).
     """
     app.state.generating = True
+    app.state.generating_podcast_id = podcast_id
     try:
         summary = await generate_all(
             app.state.wallabag_client,
             app.state.kokoro_client,
             get_settings(),
+            podcast_id=podcast_id,
         )
         logger.info("Generation finished: %s", summary)
     except Exception:
         logger.exception("Generation run crashed")
     finally:
         app.state.generating = False
+        app.state.generating_podcast_id = None
         app.state.generation_task = None
 
 
@@ -246,9 +303,45 @@ def _parse_range(range_header: str, file_size: int) -> tuple[int, int] | None:
 
 @app.get("/")
 async def home(request: Request, message: str | None = None, error: str | None = None):
+    """Redirect to the newest podcast hub; render the empty hub when none."""
     conn = connect()
     try:
-        episodes = get_queue_episodes(conn)
+        podcast = get_newest_podcast(conn)
+        podcasts = get_podcasts(conn)
+        articles_per_drive = int(get_setting(conn, "articles_per_drive") or "10")
+    finally:
+        conn.close()
+    if podcast is not None:
+        return _redirect(f"/podcast/{podcast['guid']}", message=message, error=error)
+    settings = get_settings()
+    return templates.TemplateResponse(
+        request,
+        "index.html",
+        {
+            "podcast": None,
+            "podcasts": podcasts,
+            "stats": stats(),
+            "articles_per_drive": articles_per_drive,
+            "episodes": [],
+            "generating": bool(getattr(app.state, "generating", False)),
+            "message": message,
+            "error": error,
+            "feed_title": settings.FEED_TITLE,
+            "base_url": settings.BASE_URL,
+            "wallabag_url": settings.WALLABAG_URL,
+        },
+    )
+
+
+@app.get("/podcast/{guid}")
+async def podcast_hub(
+    request: Request, guid: str, message: str | None = None, error: str | None = None
+):
+    podcast = _get_podcast_or_404(guid)
+    conn = connect()
+    try:
+        episodes = get_queue_episodes(conn, podcast["id"])
+        podcasts = get_podcasts(conn)
         articles_per_drive = int(get_setting(conn, "articles_per_drive") or "10")
     finally:
         conn.close()
@@ -257,7 +350,9 @@ async def home(request: Request, message: str | None = None, error: str | None =
         request,
         "index.html",
         {
-            "stats": stats(),
+            "podcast": podcast,
+            "podcasts": podcasts,
+            "stats": stats(podcast["id"]),
             "articles_per_drive": articles_per_drive,
             "episodes": episodes,
             "generating": bool(getattr(app.state, "generating", False)),
@@ -324,24 +419,39 @@ async def settings_page(
 
 
 # ---------------------------------------------------------------------------
-# Queue actions
+# Podcast management
 # ---------------------------------------------------------------------------
 
 
-@app.post("/queue/add-random")
-async def queue_add_random():
+@app.post("/podcasts/create")
+async def podcasts_create():
     conn = connect()
     try:
-        n = int(get_setting(conn, "articles_per_drive") or "10")
+        podcast = create_podcast(conn)
     finally:
         conn.close()
-    try:
-        count = await add_random(n, app.state.wallabag_client, get_settings())
-    except WallabagError as exc:
-        return _redirect("/", error=str(exc))
-    if count == 0:
-        return _redirect("/", message="No new articles to add")
-    return _redirect("/", message=f"Added {count} random articles")
+    return _redirect(f"/podcast/{podcast['guid']}", message="Podcast created")
+
+
+@app.post("/podcast/{guid}/delete")
+async def podcast_delete(guid: str):
+    podcast = _get_podcast_or_404(guid)
+    if (
+        getattr(app.state, "generating", False)
+        and getattr(app.state, "generating_podcast_id", None) == podcast["id"]
+    ):
+        task = getattr(app.state, "generation_task", None)
+        if task is not None and not task.done():
+            task.cancel()
+    result = delete_podcast(podcast["id"])
+    return _redirect(
+        "/", message=f"Deleted podcast {result['name']} ({result['episode_count']} episodes)"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Queue actions
+# ---------------------------------------------------------------------------
 
 
 @app.get("/episode/{episode_id}/delete")
@@ -367,8 +477,54 @@ async def confirm_delete(request: Request, episode_id: int):
     )
 
 
+@app.post("/podcast/{guid}/queue/add-random")
+async def podcast_add_random(guid: str):
+    podcast = _get_podcast_or_404(guid)
+    conn = connect()
+    try:
+        n = int(get_setting(conn, "articles_per_drive") or "10")
+    finally:
+        conn.close()
+    try:
+        count = await add_random(
+            n, app.state.wallabag_client, get_settings(), podcast_id=podcast["id"]
+        )
+    except WallabagError as exc:
+        return _redirect(f"/podcast/{guid}", error=str(exc))
+    if count == 0:
+        return _redirect(f"/podcast/{guid}", message="No new articles to add")
+    return _redirect(f"/podcast/{guid}", message=f"Added {count} random articles")
+
+
+@app.post("/podcast/{guid}/queue/generate")
+async def podcast_generate(guid: str):
+    podcast = _get_podcast_or_404(guid)
+    conn = connect()
+    try:
+        # Failed episodes are retryable: sweep them back into the queue so
+        # Generate Audio picks them up alongside newly staged episodes.
+        reset_failed_to_staged(conn, podcast["id"])
+        staged = has_staged_episodes(conn, podcast["id"])
+    finally:
+        conn.close()
+    if not staged:
+        return _redirect(f"/podcast/{guid}", error="No staged articles to generate")
+    if getattr(app.state, "generating", False):
+        return _redirect(f"/podcast/{guid}", error="A generation run is already in progress")
+    app.state.generation_task = asyncio.create_task(_run_generation(app, podcast["id"]))
+    return _redirect(f"/podcast/{guid}", message="Now generating audio")
+
+
+@app.post("/podcast/{guid}/queue/clear")
+async def podcast_clear(guid: str):
+    podcast = _get_podcast_or_404(guid)
+    count = clear_queue(podcast["id"])
+    return _redirect(f"/podcast/{guid}", message=f"Cleared {count} episodes from the queue")
+
+
 @app.post("/queue/{episode_id}/delete")
 async def queue_delete(request: Request, episode_id: int):
+    path = _owner_podcast_path(episode_id)
     conn = connect()
     try:
         status = get_episode_status(conn, episode_id)
@@ -381,45 +537,28 @@ async def queue_delete(request: Request, episode_id: int):
         task = getattr(app.state, "generation_task", None)
         if task is not None and not task.done():
             task.cancel()
-        return _json_or_redirect(request, "/", message="Stopping generation...")
+        return _json_or_redirect(request, path, message="Stopping generation...")
     try:
         delete_item(episode_id)
     except ValueError as exc:
-        return _json_or_redirect(request, "/", error=str(exc))
-    return _json_or_redirect(request, "/", message="Removed from podcast (article stays unread in Wallabag)")
+        return _json_or_redirect(request, path, error=str(exc))
+    return _json_or_redirect(request, path, message="Removed from podcast (article stays unread in Wallabag)")
 
 
 @app.post("/queue/{episode_id}/archive")
 async def queue_archive(request: Request, episode_id: int):
+    path = _owner_podcast_path(episode_id)
     try:
         await archive_item(episode_id, app.state.wallabag_client)
     except ValueError as exc:
-        return _json_or_redirect(request, "/", error=str(exc))
+        return _json_or_redirect(request, path, error=str(exc))
     except WallabagError as exc:
         return _json_or_redirect(
             request,
-            "/",
+            path,
             error=f"Could not mark article as read in Wallabag: {exc}",
         )
-    return _json_or_redirect(request, "/", message="Article marked read in Wallabag (episode kept in podcast)")
-
-
-@app.post("/queue/generate")
-async def queue_generate():
-    conn = connect()
-    try:
-        # Failed episodes are retryable: sweep them back into the queue so
-        # Generate Audio picks them up alongside newly staged episodes.
-        reset_failed_to_staged(conn)
-        staged = has_staged_episodes(conn)
-    finally:
-        conn.close()
-    if not staged:
-        return _redirect("/", error="No staged articles to generate")
-    if getattr(app.state, "generating", False):
-        return _redirect("/", error="A generation run is already in progress")
-    app.state.generation_task = asyncio.create_task(_run_generation(app))
-    return _redirect("/", message="Now generating audio")
+    return _json_or_redirect(request, path, message="Article marked read in Wallabag (episode kept in podcast)")
 
 
 @app.post("/queue/stop")
@@ -428,28 +567,33 @@ async def queue_stop():
     if task is None or task.done():
         return _redirect("/", error="No generation run to stop")
     task.cancel()
-    return _redirect("/", message="Stopping generation...")
-
-
-@app.post("/queue/clear")
-async def queue_clear():
-    count = clear_queue()
-    return _redirect("/", message=f"Cleared {count} episodes from the queue")
+    return _redirect(_generating_podcast_path(), message="Stopping generation...")
 
 
 @app.get("/queue/status")
-async def queue_status() -> JSONResponse:
-    """JSON snapshot polled by the UI while generation is running."""
+async def queue_status(podcast: str | None = None) -> JSONResponse:
+    """JSON snapshot polled by the UI while generation is running.
+
+    The given guid selects the podcast; a missing or unknown guid falls back
+    to the newest podcast (or a minimal payload when no podcast exists).
+    """
     conn = connect()
     try:
-        episodes = get_queue_episodes(conn)
+        podcasts = get_podcasts(conn)
+        active = get_podcast_by_guid(conn, podcast) if podcast is not None else None
+        if active is None:
+            active = get_newest_podcast(conn)
+        podcast_id = active["id"] if active is not None else None
+        episodes = get_queue_episodes(conn, podcast_id) if active is not None else []
     finally:
         conn.close()
     return JSONResponse(
         {
             "generating": bool(getattr(app.state, "generating", False)),
-            "stats": stats(),
+            "generating_podcast_id": getattr(app.state, "generating_podcast_id", None),
+            "stats": stats(podcast_id) if active is not None else stats(),
             "episodes": episodes,
+            "podcasts": podcasts if active is not None else [],
         }
     )
 
@@ -517,14 +661,15 @@ async def wallabag_test():
 # ---------------------------------------------------------------------------
 
 
+@app.get("/podcast/{guid}/feed.xml")
+async def podcast_feed(guid: str) -> Response:
+    podcast = _get_podcast_or_404(guid)
+    return Response(content=build_feed(podcast), media_type="application/rss+xml; charset=utf-8")
+
+
 @app.get("/health")
 async def health() -> dict[str, str]:
     return {"status": "ok"}
-
-
-@app.get("/feed.xml")
-async def feed() -> Response:
-    return Response(content=build_feed(), media_type="application/rss+xml; charset=utf-8")
 
 
 @app.get("/audio/{episode_id}.mp3")

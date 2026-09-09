@@ -1,14 +1,17 @@
 """Tests for the web UI routes in app/main.py.
 
 The env fixture points DATA_DIR at tmp_path and initializes the DB schema,
-matching the pattern used in test_pipeline.py and test_rss.py. Routes that
-need external clients (Wallabag, Kokoro) use lightweight mock objects whose
-methods are async stubs; pipeline functions that run in the background are
-patched at the ``app.main`` import site.
+matching the pattern used in test_pipeline.py and test_rss.py. init_db
+auto-creates one podcast, so most tests insert their episodes scoped to that
+podcast (``_podcast()`` returns it) and drive the UI through its hub page.
+Routes that need external clients (Wallabag, Kokoro) use lightweight mock
+objects whose methods are async stubs; pipeline functions that run in the
+background are patched at the ``app.main`` import site.
 """
 
 import asyncio
 import contextlib
+import re
 import sqlite3
 from pathlib import Path
 
@@ -16,8 +19,17 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.config import get_settings
-from app.db import connect, get_db_path, get_setting, init_db
+from app.db import (
+    connect,
+    create_podcast,
+    get_db_path,
+    get_newest_podcast,
+    get_podcast_by_guid,
+    get_setting,
+    init_db,
+)
 from app.main import _human_duration, app
+from app.pipeline import delete_podcast
 
 _REQUIRED_ENV = {
     "WALLABAG_CLIENT_ID": "test_client_id",
@@ -47,65 +59,100 @@ def client(env):
         yield test_client
 
 
-def _insert_staged(conn: sqlite3.Connection, entries: list[tuple[int, str]]) -> None:
+def _podcast() -> dict:
+    """Return the newest podcast (auto-created by init_db unless added to)."""
+    conn = connect()
+    try:
+        podcast = get_newest_podcast(conn)
+    finally:
+        conn.close()
+    assert podcast is not None
+    return podcast
+
+
+def _insert_staged(
+    conn: sqlite3.Connection,
+    entries: list[tuple[int, str]],
+    podcast_id: int | None = None,
+) -> None:
     """Insert staged episodes as (wallabag_id, title) pairs."""
     for wallabag_id, title in entries:
         conn.execute(
             "INSERT INTO episodes (wallabag_id, title, source, url, status, "
-            "est_minutes, language, created_at) VALUES (?, ?, ?, ?, 'staged', "
-            "5, 'en', '2026-01-01T00:00:00+00:00')",
+            "est_minutes, language, created_at, podcast_id) VALUES "
+            "(?, ?, ?, ?, 'staged', 5, 'en', '2026-01-01T00:00:00+00:00', ?)",
             (
                 wallabag_id,
                 title,
                 f"example.com/{wallabag_id}",
                 f"https://example.com/{wallabag_id}",
+                podcast_id,
             ),
         )
     conn.commit()
 
 
-def _insert_done(conn: sqlite3.Connection, wallabag_id: int, title: str) -> None:
+def _insert_done(
+    conn: sqlite3.Connection,
+    wallabag_id: int,
+    title: str,
+    podcast_id: int | None = None,
+) -> None:
     conn.execute(
         "INSERT INTO episodes (wallabag_id, title, source, url, status, "
         "est_minutes, language, audio_path, duration_sec, drive_id, "
-        "created_at, generated_at) VALUES (?, ?, ?, ?, 'done', 5, 'en', "
-        "'/tmp/audio.mp3', 300, 1, '2026-01-01T00:00:00+00:00', "
-        "'2026-01-02T00:00:00+00:00')",
+        "created_at, generated_at, podcast_id) VALUES (?, ?, ?, ?, 'done', "
+        "5, 'en', '/tmp/audio.mp3', 300, 1, '2026-01-01T00:00:00+00:00', "
+        "'2026-01-02T00:00:00+00:00', ?)",
         (
             wallabag_id,
             title,
             f"example.com/{wallabag_id}",
             f"https://example.com/{wallabag_id}",
+            podcast_id,
         ),
     )
     conn.commit()
 
 
-def _insert_failed(conn: sqlite3.Connection, wallabag_id: int, title: str) -> None:
+def _insert_failed(
+    conn: sqlite3.Connection,
+    wallabag_id: int,
+    title: str,
+    podcast_id: int | None = None,
+) -> None:
     conn.execute(
         "INSERT INTO episodes (wallabag_id, title, source, url, status, "
-        "est_minutes, language, error, created_at) VALUES (?, ?, ?, ?, "
-        "'failed', 5, 'en', 'some error', '2026-01-01T00:00:00+00:00')",
+        "est_minutes, language, error, created_at, podcast_id) VALUES "
+        "(?, ?, ?, ?, 'failed', 5, 'en', 'some error', "
+        "'2026-01-01T00:00:00+00:00', ?)",
         (
             wallabag_id,
             title,
             f"example.com/{wallabag_id}",
             f"https://example.com/{wallabag_id}",
+            podcast_id,
         ),
     )
     conn.commit()
 
 
-def _insert_generating(conn: sqlite3.Connection, wallabag_id: int, title: str) -> None:
+def _insert_generating(
+    conn: sqlite3.Connection,
+    wallabag_id: int,
+    title: str,
+    podcast_id: int | None = None,
+) -> None:
     conn.execute(
         "INSERT INTO episodes (wallabag_id, title, source, url, status, "
-        "est_minutes, language, created_at) VALUES (?, ?, ?, ?, 'generating', "
-        "5, 'en', '2026-01-01T00:00:00+00:00')",
+        "est_minutes, language, created_at, podcast_id) VALUES "
+        "(?, ?, ?, ?, 'generating', 5, 'en', '2026-01-01T00:00:00+00:00', ?)",
         (
             wallabag_id,
             title,
             f"example.com/{wallabag_id}",
             f"https://example.com/{wallabag_id}",
+            podcast_id,
         ),
     )
     conn.commit()
@@ -125,21 +172,26 @@ def _write_audio_file(tmp_path: Path, episode_id: int) -> Path:
 
 
 def _insert_done_audio(
-    conn: sqlite3.Connection, wallabag_id: int, title: str, audio_path: Path
+    conn: sqlite3.Connection,
+    wallabag_id: int,
+    title: str,
+    audio_path: Path,
+    podcast_id: int | None = None,
 ) -> None:
     """Insert a done episode whose audio_path points at a real file."""
     conn.execute(
         "INSERT INTO episodes (wallabag_id, title, source, url, status, "
         "est_minutes, language, audio_path, duration_sec, drive_id, "
-        "created_at, generated_at) VALUES (?, ?, ?, ?, 'done', 5, 'en', "
-        "?, 300, 1, '2026-01-01T00:00:00+00:00', "
-        "'2026-01-02T00:00:00+00:00')",
+        "created_at, generated_at, podcast_id) VALUES (?, ?, ?, ?, 'done', "
+        "5, 'en', ?, 300, 1, '2026-01-01T00:00:00+00:00', "
+        "'2026-01-02T00:00:00+00:00', ?)",
         (
             wallabag_id,
             title,
             f"example.com/{wallabag_id}",
             f"https://example.com/{wallabag_id}",
             str(audio_path),
+            podcast_id,
         ),
     )
     conn.commit()
@@ -192,8 +244,37 @@ class _MockKokoro:
 # ---------------------------------------------------------------------------
 
 
-def test_home_empty(client):
+def test_home_redirects_to_newest_podcast(client):
+    podcast = _podcast()
+
+    response = client.get("/", follow_redirects=False)
+
+    assert response.status_code == 303
+    assert response.headers["location"] == f"/podcast/{podcast['guid']}"
+
+
+def test_home_redirects_to_newest_when_multiple(client):
+    with sqlite3.connect(get_db_path()) as conn:
+        newest = create_podcast(conn)
+
+    response = client.get("/", follow_redirects=False)
+
+    assert response.headers["location"] == f"/podcast/{newest['guid']}"
+
+
+def test_home_redirect_preserves_flash_query(client):
+    podcast = _podcast()
+
+    response = client.get("/?message=hello", follow_redirects=False)
+
+    assert response.headers["location"] == f"/podcast/{podcast['guid']}?message=hello"
+
+
+def test_home_zero_podcasts_renders_empty_hub(client):
+    delete_podcast(_podcast()["id"])
+
     response = client.get("/")
+
     assert response.status_code == 200
     assert "Today" in response.text
     assert "Drive" in response.text
@@ -203,8 +284,12 @@ def test_home_empty(client):
 
 
 def test_home_shows_queue(client):
+    podcast = _podcast()
     with sqlite3.connect(get_db_path()) as conn:
-        _insert_staged(conn, [(1, "First Article"), (2, "Second Article")])
+        _insert_staged(
+            conn, [(1, "First Article"), (2, "Second Article")],
+            podcast_id=podcast["id"],
+        )
 
     response = client.get("/")
 
@@ -215,8 +300,12 @@ def test_home_shows_queue(client):
 
 
 def test_home_article_links_to_wallabag(client):
+    podcast = _podcast()
     with sqlite3.connect(get_db_path()) as conn:
-        _insert_staged(conn, [(1, "First Article"), (2, "Second Article")])
+        _insert_staged(
+            conn, [(1, "First Article"), (2, "Second Article")],
+            podcast_id=podcast["id"],
+        )
 
     response = client.get("/")
 
@@ -228,8 +317,9 @@ def test_home_article_links_to_wallabag(client):
 
 
 def test_home_shows_done_with_duration(client):
+    podcast = _podcast()
     with sqlite3.connect(get_db_path()) as conn:
-        _insert_done(conn, 10, "Finished Episode")
+        _insert_done(conn, 10, "Finished Episode", podcast_id=podcast["id"])
 
     response = client.get("/")
 
@@ -257,8 +347,12 @@ def test_human_duration_filter(minutes, expected):
 
 
 def test_home_humanizes_drive_total(client):
+    podcast = _podcast()
     with sqlite3.connect(get_db_path()) as conn:
-        _insert_staged(conn, [(1, "First Article"), (2, "Second Article")])
+        _insert_staged(
+            conn, [(1, "First Article"), (2, "Second Article")],
+            podcast_id=podcast["id"],
+        )
         conn.execute("UPDATE episodes SET est_minutes = 90 WHERE wallabag_id IN (1, 2)")
         conn.commit()
 
@@ -269,8 +363,9 @@ def test_home_humanizes_drive_total(client):
 
 
 def test_home_shows_failed_with_error(client):
+    podcast = _podcast()
     with sqlite3.connect(get_db_path()) as conn:
-        _insert_failed(conn, 20, "Broken Article")
+        _insert_failed(conn, 20, "Broken Article", podcast_id=podcast["id"])
 
     response = client.get("/")
 
@@ -281,8 +376,9 @@ def test_home_shows_failed_with_error(client):
 
 
 def test_home_failed_only_shows_ready_to_generate(client):
+    podcast = _podcast()
     with sqlite3.connect(get_db_path()) as conn:
-        _insert_failed(conn, 20, "Broken Article")
+        _insert_failed(conn, 20, "Broken Article", podcast_id=podcast["id"])
 
     response = client.get("/")
 
@@ -290,17 +386,158 @@ def test_home_failed_only_shows_ready_to_generate(client):
     assert "Ready to generate" in response.text
 
 
+def test_podcast_hub_shows_only_its_episodes(client):
+    original = _podcast()
+    with sqlite3.connect(get_db_path()) as conn:
+        other = create_podcast(conn)
+        _insert_staged(conn, [(1, "Original Episode")], podcast_id=original["id"])
+        _insert_staged(conn, [(2, "Other Episode")], podcast_id=other["id"])
+
+    response = client.get(f"/podcast/{original['guid']}")
+
+    assert response.status_code == 200
+    assert "Original Episode" in response.text
+    assert "Other Episode" not in response.text
+
+
+def test_podcast_hub_unknown_guid_404(client):
+    response = client.get("/podcast/ffffffff")
+
+    assert response.status_code == 404
+
+
+def test_create_podcast(client):
+    response = client.post("/podcasts/create", follow_redirects=False)
+
+    assert response.status_code == 303
+    location = response.headers["location"]
+    match = re.search(r"/podcast/([0-9a-f]{8})\?", location)
+    assert match is not None
+    assert "message" in location
+    guid = match.group(1)
+    with sqlite3.connect(get_db_path()) as conn:
+        podcast = get_podcast_by_guid(conn, guid)
+        podcast_count = conn.execute("SELECT COUNT(*) FROM podcasts").fetchone()[0]
+    assert podcast is not None
+    assert podcast["guid"] == guid
+    assert podcast_count == 2
+
+
+def test_delete_podcast_without_run(client, env):
+    podcast = _podcast()
+    audio_path = _write_audio_file(env, 5)
+    with sqlite3.connect(get_db_path()) as conn:
+        _insert_done_audio(
+            conn, 5, "Done Episode", audio_path, podcast_id=podcast["id"]
+        )
+        episode_id = conn.execute(
+            "SELECT id FROM episodes WHERE wallabag_id=5"
+        ).fetchone()[0]
+        conn.execute(
+            "INSERT INTO processed_articles (wallabag_id, episode_id, processed_at) "
+            "VALUES (?, ?, '2026-01-02T00:00:00+00:00')",
+            (5, episode_id),
+        )
+        conn.commit()
+
+    response = client.post(f"/podcast/{podcast['guid']}/delete", follow_redirects=False)
+
+    assert response.status_code == 303
+    assert response.headers["location"].startswith("/?")
+    assert "Deleted+podcast" in response.headers["location"]
+    with sqlite3.connect(get_db_path()) as conn:
+        assert get_newest_podcast(conn) is None
+        assert conn.execute("SELECT COUNT(*) FROM episodes").fetchone()[0] == 0
+        assert (
+            conn.execute("SELECT COUNT(*) FROM processed_articles").fetchone()[0] == 0
+        )
+    assert audio_path.exists() is False
+
+
+async def test_delete_podcast_with_active_run_cancels_and_removes(client, env):
+    podcast = _podcast()
+    audio_path = _write_audio_file(env, 5)
+    with sqlite3.connect(get_db_path()) as conn:
+        _insert_done_audio(
+            conn, 5, "Done Episode", audio_path, podcast_id=podcast["id"]
+        )
+        episode_id = conn.execute(
+            "SELECT id FROM episodes WHERE wallabag_id=5"
+        ).fetchone()[0]
+        conn.execute(
+            "INSERT INTO processed_articles (wallabag_id, episode_id, processed_at) "
+            "VALUES (?, ?, '2026-01-02T00:00:00+00:00')",
+            (5, episode_id),
+        )
+        conn.commit()
+
+    parked = asyncio.Event()
+
+    async def _noop_task():
+        await parked.wait()
+
+    task = asyncio.create_task(_noop_task())
+    app.state.generating = True
+    app.state.generating_podcast_id = podcast["id"]
+    app.state.generation_task = task
+    try:
+        response = client.post(
+            f"/podcast/{podcast['guid']}/delete", follow_redirects=False
+        )
+
+        assert response.status_code == 303
+        assert "message" in response.headers["location"]
+
+        try:
+            await asyncio.wait_for(task, timeout=5)
+        except asyncio.CancelledError:
+            pass
+        assert task.cancelled()
+
+        with sqlite3.connect(get_db_path()) as conn:
+            assert get_podcast_by_guid(conn, podcast["guid"]) is None
+            assert (
+                conn.execute(
+                    "SELECT 1 FROM episodes WHERE id=?", (episode_id,)
+                ).fetchone()
+                is None
+            )
+            assert (
+                conn.execute(
+                    "SELECT 1 FROM processed_articles WHERE wallabag_id=5"
+                ).fetchone()
+                is None
+            )
+        assert audio_path.exists() is False
+    finally:
+        app.state.generating = False
+        app.state.generating_podcast_id = None
+        app.state.generation_task = None
+        if not task.done():
+            task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await task
+
+
+def test_delete_podcast_unknown_guid_404(client):
+    response = client.post("/podcast/ffffffff/delete", follow_redirects=False)
+
+    assert response.status_code == 404
+
+
 def test_home_progress_counts_generating_episode(client):
+    podcast = _podcast()
     app.state.generating = True
     try:
         with sqlite3.connect(get_db_path()) as conn:
-            _insert_generating(conn, 100, "Mid Synthesis")
+            _insert_generating(conn, 100, "Mid Synthesis", podcast_id=podcast["id"])
             _insert_staged(
                 conn, [(101, "Staged One"), (102, "Staged Two"), (103, "Staged Three"),
-                       (104, "Staged Four"), (105, "Staged Five")]
+                       (104, "Staged Four"), (105, "Staged Five")],
+                podcast_id=podcast["id"],
             )
-            _insert_done(conn, 106, "Finished Episode")
-            _insert_failed(conn, 107, "Broken Article")
+            _insert_done(conn, 106, "Finished Episode", podcast_id=podcast["id"])
+            _insert_failed(conn, 107, "Broken Article", podcast_id=podcast["id"])
 
         response = client.get("/")
 
@@ -383,14 +620,16 @@ def test_settings_page_kokoro_unreachable(client):
 
 
 def test_add_random_success(client, monkeypatch):
-    async def mock_add_random(n, wallabag_client, settings):
+    podcast = _podcast()
+
+    async def mock_add_random(n, wallabag_client, settings, podcast_id=None):
         conn = connect()
         try:
             conn.execute(
                 "INSERT INTO episodes (wallabag_id, title, source, url, status, "
-                "est_minutes, language, created_at) VALUES (?, ?, ?, ?, 'staged', "
-                "5, 'en', '2026-01-01T00:00:00+00:00')",
-                (999, "Mocked Article", "example.com", "https://example.com"),
+                "est_minutes, language, created_at, podcast_id) VALUES "
+                "(?, ?, ?, ?, 'staged', 5, 'en', '2026-01-01T00:00:00+00:00', ?)",
+                (999, "Mocked Article", "example.com", "https://example.com", podcast_id),
             )
             conn.commit()
         finally:
@@ -399,37 +638,74 @@ def test_add_random_success(client, monkeypatch):
 
     monkeypatch.setattr("app.main.add_random", mock_add_random)
 
-    response = client.post("/queue/add-random", follow_redirects=False)
+    response = client.post(
+        f"/podcast/{podcast['guid']}/queue/add-random", follow_redirects=False
+    )
 
     assert response.status_code == 303
-    assert response.headers["location"].startswith("/?")
+    assert response.headers["location"].startswith(f"/podcast/{podcast['guid']}?")
     assert "message" in response.headers["location"]
 
     with sqlite3.connect(get_db_path()) as conn:
         row = conn.execute(
-            "SELECT title FROM episodes WHERE wallabag_id=999"
+            "SELECT title, podcast_id FROM episodes WHERE wallabag_id=999"
         ).fetchone()
     assert row is not None
     assert row[0] == "Mocked Article"
+    assert row[1] == podcast["id"]
+
+
+def test_add_random_no_articles_message(client, monkeypatch):
+    podcast = _podcast()
+
+    async def mock_add_random(n, wallabag_client, settings, podcast_id=None):
+        return 0
+
+    monkeypatch.setattr("app.main.add_random", mock_add_random)
+
+    response = client.post(
+        f"/podcast/{podcast['guid']}/queue/add-random", follow_redirects=False
+    )
+
+    assert response.status_code == 303
+    assert response.headers["location"].startswith(f"/podcast/{podcast['guid']}?")
+    assert "No+new+articles" in response.headers["location"]
 
 
 def test_add_random_wallabag_error(client, monkeypatch):
     from app.wallabag import WallabagError
 
-    async def mock_add_random(n, wallabag_client, settings):
+    podcast = _podcast()
+
+    async def mock_add_random(n, wallabag_client, settings, podcast_id=None):
         raise WallabagError("connection refused")
 
     monkeypatch.setattr("app.main.add_random", mock_add_random)
 
-    response = client.post("/queue/add-random", follow_redirects=False)
+    response = client.post(
+        f"/podcast/{podcast['guid']}/queue/add-random", follow_redirects=False
+    )
 
     assert response.status_code == 303
+    assert response.headers["location"].startswith(f"/podcast/{podcast['guid']}?")
     assert "error" in response.headers["location"]
 
 
+def test_add_random_unknown_podcast_404(client, monkeypatch):
+    async def mock_add_random(n, wallabag_client, settings, podcast_id=None):
+        raise AssertionError("add_random must not run for an unknown podcast")
+
+    monkeypatch.setattr("app.main.add_random", mock_add_random)
+
+    response = client.post("/podcast/ffffffff/queue/add-random", follow_redirects=False)
+
+    assert response.status_code == 404
+
+
 def test_delete_staged(client):
+    podcast = _podcast()
     with sqlite3.connect(get_db_path()) as conn:
-        _insert_staged(conn, [(1, "To Delete")])
+        _insert_staged(conn, [(1, "To Delete")], podcast_id=podcast["id"])
         episode_id = conn.execute(
             "SELECT id FROM episodes WHERE wallabag_id=1"
         ).fetchone()[0]
@@ -437,6 +713,7 @@ def test_delete_staged(client):
     response = client.post(f"/queue/{episode_id}/delete", follow_redirects=False)
 
     assert response.status_code == 303
+    assert response.headers["location"].startswith(f"/podcast/{podcast['guid']}?")
     assert "message" in response.headers["location"]
     with sqlite3.connect(get_db_path()) as conn:
         row = conn.execute(
@@ -446,9 +723,12 @@ def test_delete_staged(client):
 
 
 def test_delete_done_succeeds(client, env):
+    podcast = _podcast()
     audio_path = _write_audio_file(env, 5)
     with sqlite3.connect(get_db_path()) as conn:
-        _insert_done_audio(conn, 5, "Done Article", audio_path)
+        _insert_done_audio(
+            conn, 5, "Done Article", audio_path, podcast_id=podcast["id"]
+        )
         episode_id = conn.execute(
             "SELECT id FROM episodes WHERE wallabag_id=5"
         ).fetchone()[0]
@@ -462,6 +742,7 @@ def test_delete_done_succeeds(client, env):
     response = client.post(f"/queue/{episode_id}/delete", follow_redirects=False)
 
     assert response.status_code == 303
+    assert response.headers["location"].startswith(f"/podcast/{podcast['guid']}?")
     assert "message" in response.headers["location"]
     with sqlite3.connect(get_db_path()) as conn:
         row = conn.execute(
@@ -484,8 +765,9 @@ def test_delete_nonexistent(client):
 
 
 def test_confirm_delete_renders(client):
+    podcast = _podcast()
     with sqlite3.connect(get_db_path()) as conn:
-        _insert_staged(conn, [(1, "To Delete")])
+        _insert_staged(conn, [(1, "To Delete")], podcast_id=podcast["id"])
         episode_id = conn.execute(
             "SELECT id FROM episodes WHERE wallabag_id=1"
         ).fetchone()[0]
@@ -543,10 +825,38 @@ def test_rss_description_includes_delete_link(env):
 
 
 def test_generate_no_staged(client):
-    response = client.post("/queue/generate", follow_redirects=False)
+    podcast = _podcast()
+
+    response = client.post(
+        f"/podcast/{podcast['guid']}/queue/generate", follow_redirects=False
+    )
 
     assert response.status_code == 303
     assert "error" in response.headers["location"]
+
+
+def test_generate_requires_staged_in_target_podcast(client, monkeypatch):
+    original = _podcast()
+    with sqlite3.connect(get_db_path()) as conn:
+        other = create_podcast(conn)
+        _insert_staged(conn, [(1, "Other Article")], podcast_id=other["id"])
+
+    response = client.post(
+        f"/podcast/{original['guid']}/queue/generate", follow_redirects=False
+    )
+    assert response.status_code == 303
+    assert "error" in response.headers["location"]
+
+    async def mock_generate_all(wallabag_client, kokoro_client, settings, podcast_id=None):
+        return {"total": 1, "done": 1, "failed": 0, "skipped": 0}
+
+    monkeypatch.setattr("app.main.generate_all", mock_generate_all)
+
+    response = client.post(
+        f"/podcast/{other['guid']}/queue/generate", follow_redirects=False
+    )
+    assert response.status_code == 303
+    assert "error" not in response.headers["location"]
 
 
 # ---------------------------------------------------------------------------
@@ -555,10 +865,11 @@ def test_generate_no_staged(client):
 
 
 def test_archive_staged(client):
+    podcast = _podcast()
     spy = _ArchiveSpyWallabag()
     app.state.wallabag_client = spy
     with sqlite3.connect(get_db_path()) as conn:
-        _insert_staged(conn, [(1, "To Archive")])
+        _insert_staged(conn, [(1, "To Archive")], podcast_id=podcast["id"])
         episode_id = conn.execute(
             "SELECT id FROM episodes WHERE wallabag_id=1"
         ).fetchone()[0]
@@ -566,6 +877,7 @@ def test_archive_staged(client):
     response = client.post(f"/queue/{episode_id}/archive", follow_redirects=False)
 
     assert response.status_code == 303
+    assert response.headers["location"].startswith(f"/podcast/{podcast['guid']}?")
     assert "message" in response.headers["location"]
     assert spy.archive_calls == [1]
     with sqlite3.connect(get_db_path()) as conn:
@@ -577,11 +889,14 @@ def test_archive_staged(client):
 
 
 def test_archive_done_keeps_episode_and_mp3(client, env):
+    podcast = _podcast()
     spy = _ArchiveSpyWallabag()
     app.state.wallabag_client = spy
     audio_path = _write_audio_file(env, 5)
     with sqlite3.connect(get_db_path()) as conn:
-        _insert_done_audio(conn, 5, "Done Article", audio_path)
+        _insert_done_audio(
+            conn, 5, "Done Article", audio_path, podcast_id=podcast["id"]
+        )
         episode_id = conn.execute(
             "SELECT id FROM episodes WHERE wallabag_id=5"
         ).fetchone()[0]
@@ -589,6 +904,7 @@ def test_archive_done_keeps_episode_and_mp3(client, env):
     response = client.post(f"/queue/{episode_id}/archive", follow_redirects=False)
 
     assert response.status_code == 303
+    assert response.headers["location"].startswith(f"/podcast/{podcast['guid']}?")
     assert "message" in response.headers["location"]
     assert spy.archive_calls == [5]
     with sqlite3.connect(get_db_path()) as conn:
@@ -603,11 +919,14 @@ def test_archive_done_keeps_episode_and_mp3(client, env):
 def test_archive_wallabag_error_keeps_episode(client, env):
     from app.wallabag import WallabagError
 
+    podcast = _podcast()
     spy = _ArchiveSpyWallabag(error=WallabagError("connection refused"))
     app.state.wallabag_client = spy
     audio_path = _write_audio_file(env, 9)
     with sqlite3.connect(get_db_path()) as conn:
-        _insert_done_audio(conn, 9, "Stuck Article", audio_path)
+        _insert_done_audio(
+            conn, 9, "Stuck Article", audio_path, podcast_id=podcast["id"]
+        )
         episode_id = conn.execute(
             "SELECT id FROM episodes WHERE wallabag_id=9"
         ).fetchone()[0]
@@ -615,6 +934,7 @@ def test_archive_wallabag_error_keeps_episode(client, env):
     response = client.post(f"/queue/{episode_id}/archive", follow_redirects=False)
 
     assert response.status_code == 303
+    assert response.headers["location"].startswith(f"/podcast/{podcast['guid']}?")
     assert "error" in response.headers["location"]
     assert spy.archive_calls == [9]
     with sqlite3.connect(get_db_path()) as conn:
@@ -637,30 +957,68 @@ def test_archive_nonexistent(client):
 
 
 def test_generate_starts(client, monkeypatch):
+    podcast = _podcast()
     with sqlite3.connect(get_db_path()) as conn:
-        _insert_staged(conn, [(1, "Ready to Generate")])
+        _insert_staged(conn, [(1, "Ready to Generate")], podcast_id=podcast["id"])
 
-    async def mock_generate_all(wallabag_client, kokoro_client, settings):
+    async def mock_generate_all(wallabag_client, kokoro_client, settings, podcast_id=None):
         return {"total": 1, "done": 1, "failed": 0, "skipped": 0}
 
     monkeypatch.setattr("app.main.generate_all", mock_generate_all)
 
-    response = client.post("/queue/generate", follow_redirects=False)
+    response = client.post(
+        f"/podcast/{podcast['guid']}/queue/generate", follow_redirects=False
+    )
 
     assert response.status_code == 303
+    assert response.headers["location"].startswith(f"/podcast/{podcast['guid']}?")
     assert "generating" in response.headers["location"]
 
 
-def test_generate_retries_failed_only_queue(client, monkeypatch):
+def test_generate_already_running(client, monkeypatch):
+    podcast = _podcast()
     with sqlite3.connect(get_db_path()) as conn:
-        _insert_failed(conn, 7, "Broken Article")
+        _insert_staged(conn, [(1, "Ready to Generate")], podcast_id=podcast["id"])
 
-    async def mock_generate_all(wallabag_client, kokoro_client, settings):
+    async def mock_generate_all(wallabag_client, kokoro_client, settings, podcast_id=None):
+        return {"total": 1, "done": 1, "failed": 0, "skipped": 0}
+
+    monkeypatch.setattr("app.main.generate_all", mock_generate_all)
+
+    app.state.generating = True
+    try:
+        response = client.post(
+            f"/podcast/{podcast['guid']}/queue/generate", follow_redirects=False
+        )
+
+        assert response.status_code == 303
+        assert "error" in response.headers["location"]
+        assert "in+progress" in response.headers["location"]
+    finally:
+        app.state.generating = False
+        app.state.generating_podcast_id = None
+        app.state.generation_task = None
+
+
+def test_generate_unknown_podcast_404(client):
+    response = client.post("/podcast/ffffffff/queue/generate", follow_redirects=False)
+
+    assert response.status_code == 404
+
+
+def test_generate_retries_failed_only_queue(client, monkeypatch):
+    podcast = _podcast()
+    with sqlite3.connect(get_db_path()) as conn:
+        _insert_failed(conn, 7, "Broken Article", podcast_id=podcast["id"])
+
+    async def mock_generate_all(wallabag_client, kokoro_client, settings, podcast_id=None):
         return {"total": 0, "done": 0, "failed": 0, "skipped": 0}
 
     monkeypatch.setattr("app.main.generate_all", mock_generate_all)
 
-    response = client.post("/queue/generate", follow_redirects=False)
+    response = client.post(
+        f"/podcast/{podcast['guid']}/queue/generate", follow_redirects=False
+    )
 
     # The reset happens synchronously in the route: the failed-only queue no
     # longer bounces with "No staged articles to generate".
@@ -674,16 +1032,19 @@ def test_generate_retries_failed_only_queue(client, monkeypatch):
 
 
 def test_generate_sweeps_failed_into_run(client, monkeypatch):
+    podcast = _podcast()
     with sqlite3.connect(get_db_path()) as conn:
-        _insert_staged(conn, [(1, "Fresh Article")])
-        _insert_failed(conn, 2, "Broken Article")
+        _insert_staged(conn, [(1, "Fresh Article")], podcast_id=podcast["id"])
+        _insert_failed(conn, 2, "Broken Article", podcast_id=podcast["id"])
 
-    async def mock_generate_all(wallabag_client, kokoro_client, settings):
+    async def mock_generate_all(wallabag_client, kokoro_client, settings, podcast_id=None):
         return {"total": 2, "done": 2, "failed": 0, "skipped": 0}
 
     monkeypatch.setattr("app.main.generate_all", mock_generate_all)
 
-    response = client.post("/queue/generate", follow_redirects=False)
+    response = client.post(
+        f"/podcast/{podcast['guid']}/queue/generate", follow_redirects=False
+    )
 
     assert response.status_code == 303
     assert "error" not in response.headers["location"]
@@ -695,20 +1056,51 @@ def test_generate_sweeps_failed_into_run(client, monkeypatch):
 
 
 def test_clear_queue(client):
+    podcast = _podcast()
     with sqlite3.connect(get_db_path()) as conn:
-        _insert_staged(conn, [(1, "Staged One"), (2, "Staged Two")])
-        _insert_failed(conn, 3, "Failed One")
-        _insert_done(conn, 4, "Done One")
+        _insert_staged(
+            conn, [(1, "Staged One"), (2, "Staged Two")], podcast_id=podcast["id"]
+        )
+        _insert_failed(conn, 3, "Failed One", podcast_id=podcast["id"])
+        _insert_done(conn, 4, "Done One", podcast_id=podcast["id"])
 
-    response = client.post("/queue/clear", follow_redirects=False)
+    response = client.post(
+        f"/podcast/{podcast['guid']}/queue/clear", follow_redirects=False
+    )
 
     assert response.status_code == 303
+    assert response.headers["location"].startswith(f"/podcast/{podcast['guid']}?")
+    assert "Cleared+3" in response.headers["location"]
     with sqlite3.connect(get_db_path()) as conn:
         remaining = dict(conn.execute("SELECT wallabag_id, status FROM episodes"))
     assert 1 not in remaining
     assert 2 not in remaining
     assert 3 not in remaining
     assert remaining[4] == "done"
+
+
+def test_clear_queue_keeps_other_podcast(client):
+    original = _podcast()
+    with sqlite3.connect(get_db_path()) as conn:
+        other = create_podcast(conn)
+        _insert_staged(conn, [(1, "Original Staged")], podcast_id=original["id"])
+        _insert_staged(conn, [(2, "Other Staged")], podcast_id=other["id"])
+
+    response = client.post(
+        f"/podcast/{original['guid']}/queue/clear", follow_redirects=False
+    )
+
+    assert response.status_code == 303
+    with sqlite3.connect(get_db_path()) as conn:
+        remaining = dict(conn.execute("SELECT wallabag_id, status FROM episodes"))
+    assert 1 not in remaining
+    assert remaining[2] == "staged"
+
+
+def test_clear_queue_unknown_podcast_404(client):
+    response = client.post("/podcast/ffffffff/queue/clear", follow_redirects=False)
+
+    assert response.status_code == 404
 
 
 # ---------------------------------------------------------------------------
@@ -730,13 +1122,14 @@ def test_stop_no_active_run(client):
 
 
 def test_stop_active_run(client, monkeypatch):
+    podcast = _podcast()
     with sqlite3.connect(get_db_path()) as conn:
-        _insert_staged(conn, [(1, "Parked Article")])
+        _insert_staged(conn, [(1, "Parked Article")], podcast_id=podcast["id"])
 
     started = asyncio.Event()
     release = asyncio.Event()
 
-    async def mock_generate_all(wallabag_client, kokoro_client, settings):
+    async def mock_generate_all(wallabag_client, kokoro_client, settings, podcast_id=None):
         started.set()
         try:
             await release.wait()
@@ -748,9 +1141,12 @@ def test_stop_active_run(client, monkeypatch):
     monkeypatch.setattr("app.main.generate_all", mock_generate_all)
 
     app.state.generating = False
+    app.state.generating_podcast_id = None
     app.state.generation_task = None
     try:
-        resp_generate = client.post("/queue/generate", follow_redirects=False)
+        resp_generate = client.post(
+            f"/podcast/{podcast['guid']}/queue/generate", follow_redirects=False
+        )
         assert resp_generate.status_code == 303
 
         # Each sync TestClient call pumps the portal's event loop, letting the
@@ -764,10 +1160,13 @@ def test_stop_active_run(client, monkeypatch):
         resp_stop = client.post("/queue/stop", follow_redirects=False)
         assert resp_stop.status_code == 303
         assert "message" in resp_stop.headers["location"]
+        assert resp_stop.headers["location"].startswith(
+            f"/podcast/{podcast['guid']}?"
+        )
 
         # The pending cancel wins over release; the mock swallows it and
         # returns the partial summary, then _run_generation's finally clears
-        # the handle (generation_task -> None).
+        # the handle (generation_task -> None) and the run state.
         release.set()
         for _ in range(20):
             task = getattr(app.state, "generation_task", None)
@@ -776,18 +1175,22 @@ def test_stop_active_run(client, monkeypatch):
             client.get("/health")
         task = getattr(app.state, "generation_task", None)
         assert task is None or task.done()
+        assert app.state.generating is False
+        assert app.state.generating_podcast_id is None
     finally:
         release.set()
         task = getattr(app.state, "generation_task", None)
         if task is not None and not task.done():
             task.cancel()
         app.state.generating = False
+        app.state.generating_podcast_id = None
         app.state.generation_task = None
 
 
 async def test_delete_active_generating_triggers_stop(client):
+    podcast = _podcast()
     with sqlite3.connect(get_db_path()) as conn:
-        _insert_generating(conn, 42, "In Flight")
+        _insert_generating(conn, 42, "In Flight", podcast_id=podcast["id"])
         episode_id = conn.execute(
             "SELECT id FROM episodes WHERE wallabag_id=42"
         ).fetchone()[0]
@@ -805,6 +1208,9 @@ async def test_delete_active_generating_triggers_stop(client):
 
         assert response.status_code == 303
         assert "message" in response.headers["location"]
+        assert response.headers["location"].startswith(
+            f"/podcast/{podcast['guid']}?"
+        )
 
         # The route called task.cancel(); let the test loop deliver it. A
         # TimeoutError (not suppressed) means the route failed to cancel.
@@ -831,8 +1237,9 @@ async def test_delete_active_generating_triggers_stop(client):
 
 
 def test_delete_orphan_generating_deletes(client):
+    podcast = _podcast()
     with sqlite3.connect(get_db_path()) as conn:
-        _insert_generating(conn, 7, "Orphaned Episode")
+        _insert_generating(conn, 7, "Orphaned Episode", podcast_id=podcast["id"])
         episode_id = conn.execute(
             "SELECT id FROM episodes WHERE wallabag_id=7"
         ).fetchone()[0]
@@ -844,6 +1251,9 @@ def test_delete_orphan_generating_deletes(client):
 
         assert response.status_code == 303
         assert "message" in response.headers["location"]
+        assert response.headers["location"].startswith(
+            f"/podcast/{podcast['guid']}?"
+        )
 
         with sqlite3.connect(get_db_path()) as conn:
             row = conn.execute(
@@ -861,8 +1271,9 @@ def test_delete_orphan_generating_deletes(client):
 
 
 def test_stop_button_shown_while_generating(client):
+    podcast = _podcast()
     with sqlite3.connect(get_db_path()) as conn:
-        _insert_staged(conn, [(1, "Queued Article")])
+        _insert_staged(conn, [(1, "Queued Article")], podcast_id=podcast["id"])
 
     app.state.generating = True
     try:
@@ -890,8 +1301,9 @@ def test_stop_button_hidden_when_not_generating(client):
 
 
 def test_delete_button_shown_for_generating_during_run(client):
+    podcast = _podcast()
     with sqlite3.connect(get_db_path()) as conn:
-        _insert_generating(conn, 42, "In Flight")
+        _insert_generating(conn, 42, "In Flight", podcast_id=podcast["id"])
         episode_id = conn.execute(
             "SELECT id FROM episodes WHERE wallabag_id=42"
         ).fetchone()[0]
@@ -913,8 +1325,9 @@ def test_delete_button_shown_for_generating_during_run(client):
 
 
 def test_delete_button_shown_for_orphan_generating(client):
+    podcast = _podcast()
     with sqlite3.connect(get_db_path()) as conn:
-        _insert_generating(conn, 7, "Orphaned Episode")
+        _insert_generating(conn, 7, "Orphaned Episode", podcast_id=podcast["id"])
         episode_id = conn.execute(
             "SELECT id FROM episodes WHERE wallabag_id=7"
         ).fetchone()[0]
@@ -934,9 +1347,10 @@ def test_delete_button_shown_for_orphan_generating(client):
 
 
 def test_delete_button_shown_for_staged_and_failed(client):
+    podcast = _podcast()
     with sqlite3.connect(get_db_path()) as conn:
-        _insert_staged(conn, [(1, "Staged Article")])
-        _insert_failed(conn, 2, "Failed Article")
+        _insert_staged(conn, [(1, "Staged Article")], podcast_id=podcast["id"])
+        _insert_failed(conn, 2, "Failed Article", podcast_id=podcast["id"])
         staged_id = conn.execute(
             "SELECT id FROM episodes WHERE wallabag_id=1"
         ).fetchone()[0]
@@ -966,9 +1380,12 @@ def test_delete_button_shown_for_staged_and_failed(client):
 
 
 def test_delete_button_shown_for_done_with_confirm(client, env):
+    podcast = _podcast()
     audio_path = _write_audio_file(env, 3)
     with sqlite3.connect(get_db_path()) as conn:
-        _insert_done_audio(conn, 3, "Finished Episode", audio_path)
+        _insert_done_audio(
+            conn, 3, "Finished Episode", audio_path, podcast_id=podcast["id"]
+        )
         episode_id = conn.execute(
             "SELECT id FROM episodes WHERE wallabag_id=3"
         ).fetchone()[0]
@@ -990,10 +1407,11 @@ def test_delete_button_shown_for_done_with_confirm(client, env):
 
 
 def test_clear_staged_form_has_confirmation(client):
+    podcast = _podcast()
     with sqlite3.connect(get_db_path()) as conn:
-        _insert_staged(conn, [(1, "Staged Article")])
-        _insert_failed(conn, 2, "Failed Article")
-        _insert_done(conn, 3, "Done Article")
+        _insert_staged(conn, [(1, "Staged Article")], podcast_id=podcast["id"])
+        _insert_failed(conn, 2, "Failed Article", podcast_id=podcast["id"])
+        _insert_done(conn, 3, "Done Article", podcast_id=podcast["id"])
 
     app.state.generating = False
     app.state.generation_task = None
@@ -1013,9 +1431,10 @@ def test_clear_staged_form_has_confirmation(client):
 
 
 def test_archive_button_absent(client):
+    podcast = _podcast()
     with sqlite3.connect(get_db_path()) as conn:
-        _insert_staged(conn, [(1, "Staged Article")])
-        _insert_done(conn, 2, "Done Article")
+        _insert_staged(conn, [(1, "Staged Article")], podcast_id=podcast["id"])
+        _insert_done(conn, 2, "Done Article", podcast_id=podcast["id"])
 
     response = client.get("/")
 
@@ -1031,20 +1450,39 @@ def test_archive_button_absent(client):
 # ---------------------------------------------------------------------------
 
 
+def test_queue_status_zero_podcasts(client):
+    delete_podcast(_podcast()["id"])
+
+    response = client.get("/queue/status")
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["generating"] is False
+    assert data["generating_podcast_id"] is None
+    assert data["stats"]["articles"] == 0
+    assert data["episodes"] == []
+    assert data["podcasts"] == []
+
+
 def test_queue_status_empty(client):
     response = client.get("/queue/status")
 
     assert response.status_code == 200
     data = response.json()
     assert data["generating"] is False
+    assert data["generating_podcast_id"] is None
     assert data["stats"]["articles"] == 0
     assert data["episodes"] == []
+    assert len(data["podcasts"]) == 1
 
 
 def test_queue_status_with_episodes(client):
+    podcast = _podcast()
     with sqlite3.connect(get_db_path()) as conn:
-        _insert_staged(conn, [(1, "Article A"), (2, "Article B")])
-        _insert_done(conn, 3, "Article C")
+        _insert_staged(
+            conn, [(1, "Article A"), (2, "Article B")], podcast_id=podcast["id"]
+        )
+        _insert_done(conn, 3, "Article C", podcast_id=podcast["id"])
 
     response = client.get("/queue/status")
 
@@ -1056,13 +1494,56 @@ def test_queue_status_with_episodes(client):
     assert data["stats"]["done"] == 1
     ids = [ep["id"] for ep in data["episodes"]]
     assert len(ids) == 3
+    assert data["podcasts"][0]["guid"] == podcast["guid"]
+    assert data["podcasts"][0]["staged"] == 2
+    assert data["podcasts"][0]["done"] == 1
+
+
+def test_queue_status_podcast_param_scopes(client):
+    original = _podcast()
+    with sqlite3.connect(get_db_path()) as conn:
+        other = create_podcast(conn)
+        _insert_staged(conn, [(1, "Original Article")], podcast_id=original["id"])
+        _insert_done(conn, 2, "Other Done", podcast_id=other["id"])
+
+    response = client.get(f"/queue/status?podcast={other['guid']}")
+
+    assert response.status_code == 200
+    data = response.json()
+    assert [ep["title"] for ep in data["episodes"]] == ["Other Done"]
+    assert data["stats"]["staged"] == 0
+    assert data["stats"]["done"] == 1
+    by_guid = {p["guid"]: p for p in data["podcasts"]}
+    assert len(by_guid) == 2
+    assert by_guid[original["guid"]]["staged"] == 1
+    assert by_guid[other["guid"]]["done"] == 1
+
+
+def test_queue_status_unknown_podcast_param_falls_back(client):
+    podcast = _podcast()
+    with sqlite3.connect(get_db_path()) as conn:
+        _insert_staged(conn, [(1, "Article A")], podcast_id=podcast["id"])
+
+    response = client.get("/queue/status?podcast=ffffffff")
+
+    assert response.status_code == 200
+    data = response.json()
+    assert [ep["title"] for ep in data["episodes"]] == ["Article A"]
+    assert data["stats"]["staged"] == 1
 
 
 def test_queue_status_includes_chunk_progress(client):
+    podcast = _podcast()
     with sqlite3.connect(get_db_path()) as conn:
-        _insert_generating(conn, 1, "Article A")
+        episode_id = conn.execute(
+            "INSERT INTO episodes (wallabag_id, title, source, url, status, "
+            "est_minutes, language, created_at, podcast_id) VALUES "
+            "(?, ?, ?, ?, 'generating', 5, 'en', '2026-01-01T00:00:00+00:00', ?)",
+            (1, "Article A", "example.com/1", "https://example.com/1", podcast["id"]),
+        ).lastrowid
         conn.execute(
-            "UPDATE episodes SET progress_done=4, progress_total=12 WHERE id=1"
+            "UPDATE episodes SET progress_done=4, progress_total=12 WHERE id=?",
+            (episode_id,),
         )
         conn.commit()
 
@@ -1070,24 +1551,32 @@ def test_queue_status_includes_chunk_progress(client):
 
     assert response.status_code == 200
     episodes = {ep["id"]: ep for ep in response.json()["episodes"]}
-    assert episodes[1]["progress_done"] == 4
-    assert episodes[1]["progress_total"] == 12
+    assert episodes[episode_id]["progress_done"] == 4
+    assert episodes[episode_id]["progress_total"] == 12
 
 
 def test_home_renders_generating_row_with_progress(client):
+    podcast = _podcast()
     app.state.generating = True
     try:
         with sqlite3.connect(get_db_path()) as conn:
-            _insert_generating(conn, 7, "Article G")
+            episode_id = conn.execute(
+                "INSERT INTO episodes (wallabag_id, title, source, url, status, "
+                "est_minutes, language, created_at, podcast_id) VALUES "
+                "(?, ?, ?, ?, 'generating', 5, 'en', '2026-01-01T00:00:00+00:00', ?)",
+                (7, "Article G", "example.com/7", "https://example.com/7",
+                 podcast["id"]),
+            ).lastrowid
             conn.execute(
-                "UPDATE episodes SET progress_done=4, progress_total=12 WHERE id=1"
+                "UPDATE episodes SET progress_done=4, progress_total=12 WHERE id=?",
+                (episode_id,),
             )
             conn.commit()
 
         response = client.get("/")
 
         assert response.status_code == 200
-        assert 'id="ep-progress-1"' in response.text
+        assert f'id="ep-progress-{episode_id}"' in response.text
         assert 'aria-valuenow="4"' in response.text
         assert 'aria-valuemax="12"' in response.text
         assert 'title="4 of 12 chunks synthesized"' in response.text
@@ -1204,11 +1693,10 @@ def test_wallabag_test_fail(client):
 # ---------------------------------------------------------------------------
 
 
-def test_feed_route_still_works(client):
+def test_legacy_feed_route_removed(client):
     response = client.get("/feed.xml")
 
-    assert response.status_code == 200
-    assert "xml" in response.headers["content-type"]
+    assert response.status_code == 404
 
 
 def test_health_route(client):

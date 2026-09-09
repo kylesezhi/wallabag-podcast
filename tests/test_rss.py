@@ -229,20 +229,38 @@ def test_missing_audio_and_bad_generated_at_are_graceful(env):
 
 
 def test_feed_route(env):
+    """The legacy global /feed.xml route is gone: it must 404."""
+    from fastapi.testclient import TestClient
+
+    from app.main import app
+
+    with TestClient(app) as client:
+        response = client.get("/feed.xml")
+
+    assert response.status_code == 404
+
+
+def test_podcast_feed_route(env):
     from fastapi.testclient import TestClient
 
     from app.main import app
 
     with sqlite3.connect(get_db_path()) as conn:
-        _insert_done(conn, 1, "First Article", "2026-01-01T00:00:00+00:00")
+        podcast = create_podcast(conn)
+        _insert_done(
+            conn, 1, "First Article", "2026-01-01T00:00:00+00:00",
+            podcast_id=podcast["id"],
+        )
 
     with TestClient(app) as client:
-        response = client.get("/feed.xml")
+        response = client.get(f"/podcast/{podcast['guid']}/feed.xml")
 
     assert response.status_code == 200
     assert "xml" in response.headers["content-type"]
     root = ET.fromstring(response.content)
     assert root.tag == "rss"
+    channel = root.find("channel")
+    assert channel.find("title").text == podcast["name"]
     assert len(root.findall("channel/item")) == 1
 
 
