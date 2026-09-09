@@ -13,6 +13,7 @@ import asyncio
 import contextlib
 import re
 import sqlite3
+import time
 from pathlib import Path
 
 import pytest
@@ -25,11 +26,13 @@ from app.db import (
     get_db_path,
     get_newest_podcast,
     get_podcast_by_guid,
+    get_podcasts,
     get_setting,
     init_db,
 )
 from app.main import _human_duration, app
 from app.pipeline import delete_podcast
+from app.wallabag import ArticleFull, ArticleMeta
 
 _REQUIRED_ENV = {
     "WALLABAG_CLIENT_ID": "test_client_id",
@@ -1843,3 +1846,212 @@ def test_audio_invalid_range_416(client, env):
 
     assert response.status_code == 416
     assert response.headers["content-range"] == "bytes */100"
+
+
+# ---------------------------------------------------------------------------
+# End-to-end journey: real routes + real pipeline (clients mocked)
+# ---------------------------------------------------------------------------
+
+
+def _journey_articles() -> list[dict]:
+    """Wallabag payloads for the journey: metadata + full HTML content."""
+    articles = []
+    for entry_id in (101, 102, 103):
+        articles.append(
+            {
+                "id": entry_id,
+                "title": f"Journey Article {entry_id}",
+                "url": f"https://example.com/{entry_id}",
+                "domain_name": "example.com",
+                "reading_time": 5,
+                "language": "en",
+                "tags": [],
+                # Long enough to clear MIN_TEXT_CHARS (default 200).
+                "content": "<p>" + " ".join(["word"] * 100) + "</p>",
+            }
+        )
+    return articles
+
+
+class _JourneyWallabag:
+    """Fake wallabag client serving the journey articles to the real pipeline."""
+
+    def __init__(self, articles: list[dict]):
+        self._articles = articles
+
+    async def list_unread_metadata(self) -> list[ArticleMeta]:
+        return [
+            ArticleMeta(
+                id=a["id"],
+                title=a["title"],
+                url=a["url"],
+                domain_name=a["domain_name"],
+                reading_time=a["reading_time"],
+                language=a["language"],
+                tags=a["tags"],
+                is_archived=False,
+                is_starred=False,
+            )
+            for a in self._articles
+        ]
+
+    async def get_entry(self, entry_id: int) -> ArticleFull:
+        article = next(a for a in self._articles if a["id"] == entry_id)
+        return ArticleFull(
+            id=article["id"],
+            title=article["title"],
+            url=article["url"],
+            domain_name=article["domain_name"],
+            reading_time=article["reading_time"],
+            language=article["language"],
+            tags=article["tags"],
+            is_archived=False,
+            is_starred=False,
+            content=article["content"],
+        )
+
+    async def aclose(self) -> None:
+        pass
+
+
+class _JourneyKokoro:
+    """Fake kokoro client returning unparseable bytes (duration fallback)."""
+
+    async def synthesize(self, text: str, voice: str | None = None) -> bytes:
+        return b"FAKE_MP3_BYTES"
+
+    async def aclose(self) -> None:
+        pass
+
+
+def test_podcast_journey_create_generate_delete(client, env):
+    """Drive one podcast through the real routes and pipeline.
+
+    Covers the wiring the unit tests mock away: POST /podcasts/create
+    building a podcast, add-random staging into it via the real add_random,
+    POST generate running the real generate_all to done episodes with audio
+    on disk, per-podcast feeds, JSON podcast delete cleanup, and the home
+    redirect/empty-hub transitions.
+    """
+    create_response = client.post("/podcasts/create", follow_redirects=False)
+    assert create_response.status_code == 303
+    match = re.search(r"/podcast/([0-9a-f]{8})\?", create_response.headers["location"])
+    assert match is not None
+    guid = match.group(1)
+    with sqlite3.connect(get_db_path()) as conn:
+        podcast = get_podcast_by_guid(conn, guid)
+        podcasts = get_podcasts(conn)
+        newest = get_newest_podcast(conn)
+    assert podcast is not None
+    assert newest is not None and newest["id"] == podcast["id"]
+    other = next(p for p in podcasts if p["guid"] != guid)
+
+    app.state.wallabag_client = _JourneyWallabag(_journey_articles())
+    app.state.kokoro_client = _JourneyKokoro()
+
+    response = client.post(
+        f"/podcast/{guid}/queue/add-random", follow_redirects=False
+    )
+    assert response.status_code == 303
+    assert "message" in response.headers["location"]
+    with sqlite3.connect(get_db_path()) as conn:
+        staged = conn.execute(
+            "SELECT wallabag_id FROM episodes WHERE status='staged' AND podcast_id=?",
+            (podcast["id"],),
+        ).fetchall()
+        other_episodes = conn.execute(
+            "SELECT COUNT(*) FROM episodes WHERE podcast_id=?", (other["id"],)
+        ).fetchone()[0]
+    assert sorted(row[0] for row in staged) == [101, 102, 103]
+    assert other_episodes == 0
+
+    response = client.post(
+        f"/podcast/{guid}/queue/generate", follow_redirects=False
+    )
+    assert response.status_code == 303
+    assert "message" in response.headers["location"]
+
+    deadline = time.monotonic() + 10
+    while True:
+        client.get("/health")
+        with sqlite3.connect(get_db_path()) as conn:
+            rows = conn.execute(
+                "SELECT status, error FROM episodes WHERE podcast_id=?",
+                (podcast["id"],),
+            ).fetchall()
+        failed = [row[1] for row in rows if row[0] == "failed"]
+        assert not failed, f"episode failed during generation: {failed[0]}"
+        done = bool(rows) and all(row[0] == "done" for row in rows)
+        idle = (
+            not getattr(app.state, "generating", False)
+            and getattr(app.state, "generation_task", None) is None
+        )
+        if done and idle:
+            break
+        assert time.monotonic() < deadline, (
+            "generation did not finish within 10s; "
+            f"statuses={[tuple(row) for row in rows]}"
+        )
+        time.sleep(0.05)
+
+    with sqlite3.connect(get_db_path()) as conn:
+        episodes = conn.execute(
+            "SELECT wallabag_id, audio_path, duration_sec FROM episodes "
+            "WHERE podcast_id=? ORDER BY wallabag_id",
+            (podcast["id"],),
+        ).fetchall()
+        processed = {
+            row[0]
+            for row in conn.execute("SELECT wallabag_id FROM processed_articles")
+        }
+    assert len(episodes) == 3
+    assert all(row[0] in processed for row in episodes)
+    audio_paths = [Path(row[1]) for row in episodes]
+    assert all(path.exists() for path in audio_paths)
+    assert all(row[2] == 300 for row in episodes)
+
+    import xml.etree.ElementTree as ET
+
+    feed_response = client.get(f"/podcast/{guid}/feed.xml")
+    assert feed_response.status_code == 200
+    root = ET.fromstring(feed_response.content)
+    assert root.find("channel/title").text == podcast["name"]
+    items = root.findall("channel/item")
+    assert len(items) == 3
+    assert {item.find("title").text for item in items} == {
+        f"Journey Article {entry_id}" for entry_id in (101, 102, 103)
+    }
+    other_feed = ET.fromstring(
+        client.get(f"/podcast/{other['guid']}/feed.xml").content
+    )
+    assert other_feed.findall("channel/item") == []
+
+    response = client.post(
+        f"/podcast/{guid}/delete", headers={"Accept": "application/json"}
+    )
+    assert response.status_code == 200
+    assert response.json()["ok"] is True
+    with sqlite3.connect(get_db_path()) as conn:
+        assert conn.execute("SELECT COUNT(*) FROM episodes").fetchone()[0] == 0
+        assert (
+            conn.execute("SELECT COUNT(*) FROM processed_articles").fetchone()[0] == 0
+        )
+        remaining = conn.execute("SELECT guid FROM podcasts").fetchall()
+        newest = get_newest_podcast(conn)
+    assert [row[0] for row in remaining] == [other["guid"]]
+    assert newest is not None and newest["id"] == other["id"]
+    assert all(not path.exists() for path in audio_paths)
+
+    response = client.get("/", follow_redirects=False)
+    assert response.status_code == 303
+    assert response.headers["location"] == f"/podcast/{other['guid']}"
+
+    response = client.post(
+        f"/podcast/{other['guid']}/delete", headers={"Accept": "application/json"}
+    )
+    assert response.status_code == 200
+    assert response.json()["ok"] is True
+    response = client.get("/")
+    assert response.status_code == 200
+    assert "No podcasts yet" in response.text
+    assert "New Podcast" in response.text
