@@ -12,7 +12,7 @@ import xml.etree.ElementTree as ET
 import pytest
 
 from app.config import get_settings
-from app.db import get_db_path, init_db
+from app.db import create_podcast, get_db_path, init_db
 from app.rss import build_feed
 
 _REQUIRED_ENV = {
@@ -45,14 +45,16 @@ def _insert_done(
     generated_at: str,
     audio_path: str | None = None,
     duration_sec: int = 60,
+    podcast_id: int | None = None,
 ) -> None:
     """Insert a done episode with the given generated_at timestamp."""
-    conn.execute(
-        "INSERT INTO episodes (wallabag_id, title, source, url, status, "
-        "est_minutes, language, audio_path, duration_sec, drive_id, "
-        "created_at, generated_at) VALUES (?, ?, ?, ?, 'done', 5, 'en', ?, ?, "
-        "1, '2026-01-01T00:00:00+00:00', ?)",
-        (
+    if podcast_id is None:
+        columns = (
+            "wallabag_id, title, source, url, status, est_minutes, language, "
+            "audio_path, duration_sec, drive_id, created_at, generated_at"
+        )
+        values = "?, ?, ?, ?, 'done', 5, 'en', ?, ?, 1, '2026-01-01T00:00:00+00:00', ?"
+        params = (
             wallabag_id,
             title,
             f"example.com/{wallabag_id}",
@@ -60,7 +62,29 @@ def _insert_done(
             audio_path,
             duration_sec,
             generated_at,
-        ),
+        )
+    else:
+        columns = (
+            "wallabag_id, title, source, url, status, est_minutes, language, "
+            "audio_path, duration_sec, drive_id, created_at, generated_at, "
+            "podcast_id"
+        )
+        values = (
+            "?, ?, ?, ?, 'done', 5, 'en', ?, ?, 1, '2026-01-01T00:00:00+00:00', "
+            "?, ?"
+        )
+        params = (
+            wallabag_id,
+            title,
+            f"example.com/{wallabag_id}",
+            f"https://example.com/{wallabag_id}",
+            audio_path,
+            duration_sec,
+            generated_at,
+            podcast_id,
+        )
+    conn.execute(
+        f"INSERT INTO episodes ({columns}) VALUES ({values})", params
     )
     conn.commit()
 
@@ -232,3 +256,80 @@ def test_static_cover_served(env):
 
     assert response.status_code == 200
     assert "image/png" in response.headers["content-type"]
+
+
+def _podcast_channel(feed: bytes) -> ET.Element:
+    root = ET.fromstring(feed)
+    assert root.tag == "rss"
+    return root.find("channel")
+
+
+def test_podcast_feed_channel_metadata(env):
+    with sqlite3.connect(get_db_path()) as conn:
+        podcast = create_podcast(conn)
+
+    feed = build_feed(podcast)
+
+    channel = _podcast_channel(feed)
+    base_url = get_settings().BASE_URL
+    feed_url = f"{base_url}/podcast/{podcast['guid']}/feed.xml"
+    hub_url = f"{base_url}/podcast/{podcast['guid']}"
+    assert channel.find("title").text == podcast["name"]
+    assert channel.find("description").text == (
+        "Podcast generated from Wallabag saved articles"
+    )
+    atom_link = channel.find("{http://www.w3.org/2005/Atom}link")
+    assert atom_link.get("rel") == "self"
+    assert atom_link.get("href") == feed_url
+    image = channel.find("image")
+    assert image.find("title").text == podcast["name"]
+    assert image.find("url").text == f"{base_url}/static/cover.png"
+    assert image.find("link").text == hub_url
+    assert (
+        channel.find("itunes:image", _NS).get("href")
+        == f"{base_url}/static/cover.png"
+    )
+
+
+def test_podcast_feed_scoped_episodes(env):
+    with sqlite3.connect(get_db_path()) as conn:
+        p1 = create_podcast(conn)
+        p2 = create_podcast(conn)
+        _insert_done(conn, 1, "P1 Old", "2026-01-01T00:00:00+00:00", podcast_id=p1["id"])
+        _insert_done(conn, 2, "P1 New", "2026-01-02T00:00:00+00:00", podcast_id=p1["id"])
+        _insert_done(conn, 3, "P2 Only", "2026-01-03T00:00:00+00:00", podcast_id=p2["id"])
+
+    p1_items = _feed_items(build_feed(p1))
+    assert [item.find("title").text for item in p1_items] == ["P1 New", "P1 Old"]
+
+    p2_items = _feed_items(build_feed(p2))
+    assert [item.find("title").text for item in p2_items] == ["P2 Only"]
+
+
+def test_podcast_feed_empty(env):
+    with sqlite3.connect(get_db_path()) as conn:
+        podcast = create_podcast(conn)
+
+    channel = _podcast_channel(build_feed(podcast))
+
+    assert channel.findall("item") == []
+    base_url = get_settings().BASE_URL
+    assert (
+        channel.find("itunes:image", _NS).get("href")
+        == f"{base_url}/static/cover.png"
+    )
+    assert channel.find("image").find("url").text == f"{base_url}/static/cover.png"
+
+
+def test_legacy_feed_still_global(env):
+    with sqlite3.connect(get_db_path()) as conn:
+        p1 = create_podcast(conn)
+        p2 = create_podcast(conn)
+        _insert_done(conn, 1, "P1 Ep", "2026-01-01T00:00:00+00:00", podcast_id=p1["id"])
+        _insert_done(conn, 2, "P2 Ep", "2026-01-02T00:00:00+00:00", podcast_id=p2["id"])
+
+    feed = build_feed()
+
+    channel = _podcast_channel(feed)
+    assert channel.find("title").text == get_settings().FEED_TITLE
+    assert len(channel.findall("item")) == 2

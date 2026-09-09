@@ -346,17 +346,26 @@ def get_staged_episodes(
     ]
 
 
-def get_feed_episodes(conn: sqlite3.Connection) -> list[dict]:
-    """Return done episodes for the podcast feed, newest generated first.
+def get_feed_episodes(
+    conn: sqlite3.Connection, podcast_id: int | None = None
+) -> list[dict]:
+    """Return done episodes for a podcast feed, newest generated first.
 
     Only ``status='done'`` episodes are included (archived episodes are
-    excluded by status). Keys: id, wallabag_id, title, source, url,
+    excluded by status). When ``podcast_id`` is given, only that podcast's
+    done episodes are returned; otherwise all done episodes are returned
+    (global behavior). Keys: id, wallabag_id, title, source, url,
     audio_path, duration_sec, generated_at.
     """
+    where = "WHERE status='done'"
+    params: tuple = ()
+    if podcast_id is not None:
+        where += " AND podcast_id=?"
+        params = (podcast_id,)
     rows = conn.execute(
         "SELECT id, wallabag_id, title, source, url, audio_path, duration_sec, "
-        "generated_at FROM episodes WHERE status='done' "
-        "ORDER BY generated_at DESC"
+        f"generated_at FROM episodes {where} ORDER BY generated_at DESC",
+        params,
     ).fetchall()
     return [
         {

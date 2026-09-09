@@ -3,6 +3,12 @@
 Builds a feed from done, non-archived episodes (newest generated first).
 Audio files are referenced at ``{BASE_URL}/audio/{id}.mp3``. The channel and
 each episode carry the cover art at ``{BASE_URL}/static/cover.png``.
+
+Each podcast has its own feed addressed by GUID at
+``{BASE_URL}/podcast/{guid}/feed.xml``: the podcast name is the channel title,
+the alternate link points at the podcast hub page, and only that podcast's
+done episodes are included. Calling :func:`build_feed` without a podcast
+emits the legacy global feed at ``{BASE_URL}/feed.xml`` under ``FEED_TITLE``.
 """
 
 from __future__ import annotations
@@ -40,7 +46,9 @@ def _enclosure_length(audio_path: str | None) -> int:
         return 0
 
 
-def build_feed(settings: Settings | None = None) -> bytes:
+def build_feed(
+    podcast: dict | None = None, settings: Settings | None = None
+) -> bytes:
     """Build a podcast RSS 2.0 feed and return it as UTF-8 XML bytes.
 
     The channel carries iTunes podcast metadata (category, explicit,
@@ -48,6 +56,13 @@ def build_feed(settings: Settings | None = None) -> bytes:
     ``<image>`` element); each episode carries an iTunes duration, explicit
     flag, episode type, and the same cover art. Episodes whose audio file is
     missing still appear with enclosure length 0.
+
+    When ``podcast`` is given (a record from :func:`app.db.create_podcast` or
+    :func:`app.db.get_podcast_by_guid`), the channel is scoped to that
+    podcast: its name becomes the title, the feed id and self link use the
+    GUID-based URL ``{BASE_URL}/podcast/{guid}/feed.xml``, and only that
+    podcast's episodes are included. Without a podcast the legacy global
+    feed under ``FEED_TITLE`` is produced.
     """
     settings = settings or get_settings()
 
@@ -56,21 +71,32 @@ def build_feed(settings: Settings | None = None) -> bytes:
 
     cover_url = f"{settings.BASE_URL}/static/cover.png"
 
-    fg.id(f"{settings.BASE_URL}/feed.xml")
-    fg.title(settings.FEED_TITLE)
-    fg.link(href=f"{settings.BASE_URL}/feed.xml", rel="self")
-    fg.link(href=f"{settings.BASE_URL}/", rel="alternate")
+    if podcast is None:
+        feed_url = f"{settings.BASE_URL}/feed.xml"
+        alternate_url = f"{settings.BASE_URL}/"
+        channel_title = settings.FEED_TITLE
+        podcast_id = None
+    else:
+        feed_url = f"{settings.BASE_URL}/podcast/{podcast['guid']}/feed.xml"
+        alternate_url = f"{settings.BASE_URL}/podcast/{podcast['guid']}"
+        channel_title = podcast["name"]
+        podcast_id = podcast["id"]
+
+    fg.id(feed_url)
+    fg.title(channel_title)
+    fg.link(href=feed_url, rel="self")
+    fg.link(href=alternate_url, rel="alternate")
     fg.description("Podcast generated from Wallabag saved articles")
     fg.language("en")
     fg.podcast.itunes_category("Society & Culture")
     fg.podcast.itunes_explicit("no")
     fg.podcast.itunes_type("episodic")
     fg.podcast.itunes_image(cover_url)
-    fg.image(cover_url, title=settings.FEED_TITLE, link=settings.BASE_URL)
+    fg.image(cover_url, title=channel_title, link=alternate_url)
 
     conn = connect()
     try:
-        episodes = get_feed_episodes(conn)
+        episodes = get_feed_episodes(conn, podcast_id)
     finally:
         conn.close()
 
