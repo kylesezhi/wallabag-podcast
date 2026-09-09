@@ -1,3 +1,4 @@
+- generate multiple podcasts
 - default voice setting for all episodes, but configurable on per ep basis before generation
 - add by wallabag entry number
 - reduce verbose comments in code
