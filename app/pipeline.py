@@ -9,6 +9,7 @@
   article as read in Wallabag WITHOUT deleting anything locally. The two are
   independent operations.
 - ``stats`` summarizes the queue for the UI.
+- ``delete_podcast`` removes a podcast's rows, dedupe entries, and audio files.
 - ``generate_all()`` produces one MP3 per staged episode: fetch the full
   Wallabag entry, clean the HTML into TTS input, split it into bounded chunks
   (``Settings.KOKORO_MAX_CHUNK_CHARS``), synthesize each chunk with Kokoro and
@@ -37,6 +38,7 @@ from .db import (
     add_processed_article,
     connect,
     delete_episode,
+    delete_podcast as _delete_podcast_rows,
     delete_processed_article,
     delete_staged_failed_episodes,
     get_episode_progress,
@@ -65,6 +67,7 @@ async def add_random(
     n: int,
     wallabag_client: WallabagClient,
     settings: Settings | None = None,
+    podcast_id: int | None = None,
 ) -> int:
     """Fetch unread Wallabag metadata, filter exclusions + already-known
     articles, pick ``n`` at random, and insert them as ``staged`` episodes.
@@ -72,7 +75,10 @@ async def add_random(
     An article is excluded if any of its tags is in ``settings.EXCLUDE_TAGS``
     (case-insensitive) or if its wallabag_id is already known — either in
     ``processed_articles`` (successfully generated before) or on any existing
-    episode row. Returns the number actually staged (may be < n).
+    episode row. The candidate pool is global across podcasts: an article can
+    only ever be staged into one podcast. When ``podcast_id`` is given the
+    staged articles belong to that podcast; otherwise they have no podcast.
+    Returns the number actually staged (may be < n).
     """
     settings = settings or get_settings()
     exclude = {tag.lower() for tag in settings.EXCLUDE_TAGS}
@@ -100,7 +106,14 @@ async def add_random(
         count = 0
         for m in chosen:
             insert_staged_episode(
-                conn, m.id, m.title, m.domain_name, m.url, m.reading_time, m.language
+                conn,
+                m.id,
+                m.title,
+                m.domain_name,
+                m.url,
+                m.reading_time,
+                m.language,
+                podcast_id=podcast_id,
             )
             count += 1
         return count
@@ -171,29 +184,33 @@ async def archive_item(
     await wallabag_client.archive(wallabag_id)
 
 
-def clear_queue() -> int:
+def clear_queue(podcast_id: int | None = None) -> int:
     """Delete staged|failed episodes. Returns count deleted.
 
     Does NOT touch done/archived episodes or their processed_articles rows.
+    When ``podcast_id`` is given, only that podcast's staged|failed episodes
+    are deleted; otherwise the whole queue is swept.
     """
     conn = connect()
     try:
-        return delete_staged_failed_episodes(conn)
+        return delete_staged_failed_episodes(conn, podcast_id)
     finally:
         conn.close()
 
 
-def stats() -> dict:
+def stats(podcast_id: int | None = None) -> dict:
     """Return queue statistics: minutes, article count, status counts, drive_id.
 
     ``total_minutes`` = sum(est_minutes for staged) + sum(duration_sec // 60
     for done). ``articles`` counts the active queue (staged + done + failed +
     generating, excluding archived). ``drive_id`` is the most recent done
-    episode's drive_id, or None.
+    episode's drive_id, or None. When ``podcast_id`` is given the statistics
+    cover only that podcast's episodes; otherwise the whole queue is
+    summarized.
     """
     conn = connect()
     try:
-        rows = get_stats_rows(conn)
+        rows = get_stats_rows(conn, podcast_id)
         counts = rows["status_counts"]
         staged = int(counts.get("staged", 0))
         done = int(counts.get("done", 0))
@@ -208,6 +225,55 @@ def stats() -> dict:
             "generating": generating,
             "archived": int(counts.get("archived", 0)),
             "drive_id": rows["done_drive_id"],
+        }
+    finally:
+        conn.close()
+
+
+def delete_podcast(podcast_id: int) -> dict:
+    """Delete a podcast: its rows, dedupe entries, and audio files.
+
+    Best-effort disk cleanup removes every generated mp3 listed on the
+    podcast's episodes plus any in-progress ``{episode_id}.mp3.part`` file, so
+    a podcast deleted while an episode is mid-synthesis leaves no audio
+    behind. Raises ValueError when the podcast id is unknown.
+    """
+    conn = connect()
+    try:
+        result = _delete_podcast_rows(conn, podcast_id)
+        if result is None:
+            raise ValueError(f"Podcast {podcast_id} not found")
+        audio_dir = get_settings().DATA_DIR / "audio"
+        removed_files = 0
+        for path in result["audio_paths"]:
+            candidate = Path(path)
+            if not candidate.exists():
+                continue
+            try:
+                candidate.unlink(missing_ok=True)
+                removed_files += 1
+            except OSError:
+                pass
+        for episode_id in result["episode_ids"]:
+            part_path = audio_dir / f"{episode_id}.mp3.part"
+            if not part_path.exists():
+                continue
+            try:
+                part_path.unlink(missing_ok=True)
+                removed_files += 1
+            except OSError:
+                pass
+        logger.info(
+            "Deleted podcast %s (%s): %s episodes, %s audio files removed",
+            result["name"],
+            result["guid"],
+            result["episode_count"],
+            removed_files,
+        )
+        return {
+            "name": result["name"],
+            "guid": result["guid"],
+            "episode_count": result["episode_count"],
         }
     finally:
         conn.close()
@@ -335,8 +401,13 @@ async def generate_all(
     wallabag_client: WallabagClient,
     kokoro_client: KokoroClient,
     settings: Settings | None = None,
+    podcast_id: int | None = None,
 ) -> dict:
     """Generate audio for all staged episodes, one at a time.
+
+    When ``podcast_id`` is given, only that podcast's staged episodes are
+    generated; otherwise every staged episode is generated. Each run — scoped
+    or global — draws one global drive_id and behaves identically.
 
     Each episode's TTS text is split into bounded chunks
     (``Settings.KOKORO_MAX_CHUNK_CHARS``) that are synthesized sequentially and
@@ -366,7 +437,7 @@ async def generate_all(
 
     conn = connect()
     try:
-        staged = get_staged_episodes(conn)
+        staged = get_staged_episodes(conn, podcast_id)
         summary["total"] = len(staged)
         logger.info("Generation run started: %s staged episodes", summary["total"])
         if not staged:

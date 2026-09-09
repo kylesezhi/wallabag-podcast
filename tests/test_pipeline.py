@@ -17,8 +17,10 @@ import pytest
 from app.config import Settings, get_settings
 from app.db import (
     add_processed_article,
+    create_podcast,
     get_db_path,
     get_queue_episodes,
+    get_staged_episodes,
     init_db,
     reset_failed_to_staged,
 )
@@ -30,6 +32,7 @@ from app.pipeline import (
     archive_item,
     clear_queue,
     delete_item,
+    delete_podcast,
     generate_all,
     stats,
 )
@@ -218,12 +221,17 @@ def _insert_episode(
     est_minutes: int = 5,
     duration_sec: int | None = None,
     drive_id: int | None = None,
+    podcast_id: int | None = None,
 ) -> int:
-    """Insert an episode with the given status; return its id."""
+    """Insert an episode with the given status; return its id.
+
+    When ``podcast_id`` is given it is stored on the episode row; otherwise
+    the column stays NULL.
+    """
     cur = conn.execute(
         "INSERT INTO episodes (wallabag_id, title, source, url, status, "
-        "est_minutes, language, duration_sec, drive_id, created_at) "
-        "VALUES (?, ?, ?, ?, ?, ?, 'en', ?, ?, '2026-01-01T00:00:00+00:00')",
+        "est_minutes, language, duration_sec, drive_id, created_at, podcast_id) "
+        "VALUES (?, ?, ?, ?, ?, ?, 'en', ?, ?, '2026-01-01T00:00:00+00:00', ?)",
         (
             wallabag_id,
             title,
@@ -233,6 +241,7 @@ def _insert_episode(
             est_minutes,
             duration_sec,
             drive_id,
+            podcast_id,
         ),
     )
     conn.commit()
@@ -1369,3 +1378,235 @@ async def test_lifecycle_logs_on_success(env, monkeypatch, logging_restore):
     assert "Generation run started: 1 staged episodes" in text
     assert "Generating episode 1 (wallabag=1, 1 chunks)" in text
     assert "Episode 1 done: 60s audio, 1 chunks" in text
+
+
+# ---------------------------------------------------------------------------
+# Podcast scoping: add_random / generate_all / stats / clear_queue / delete
+# ---------------------------------------------------------------------------
+
+
+async def test_add_random_stages_into_podcast(env, monkeypatch):
+    monkeypatch.setattr("app.pipeline.random.sample", lambda pop, k: pop[:k])
+    with sqlite3.connect(get_db_path()) as conn:
+        podcast = create_podcast(conn)
+    wallabag = _make_wallabag(_metadata_handler([_meta_item(i) for i in range(1, 6)]))
+
+    count = await add_random(
+        3, wallabag, settings=get_settings(), podcast_id=podcast["id"]
+    )
+
+    assert count == 3
+    with sqlite3.connect(get_db_path()) as conn:
+        staged = get_staged_episodes(conn, podcast_id=podcast["id"])
+        assert [e["wallabag_id"] for e in staged] == [1, 2, 3]
+        rows = conn.execute(
+            "SELECT podcast_id FROM episodes WHERE status='staged' ORDER BY id"
+        ).fetchall()
+        assert all(row[0] == podcast["id"] for row in rows)
+
+
+async def test_add_random_no_repeat_across_podcasts(env, monkeypatch):
+    """The global no-repeat invariant spans podcasts: articles staged into one
+    podcast are never re-staged into another."""
+    monkeypatch.setattr("app.pipeline.random.sample", lambda pop, k: pop[:k])
+    with sqlite3.connect(get_db_path()) as conn:
+        podcast_a = create_podcast(conn)
+        podcast_b = create_podcast(conn)
+    wallabag = _make_wallabag(_metadata_handler([_meta_item(i) for i in range(1, 6)]))
+
+    first = await add_random(
+        3, wallabag, settings=get_settings(), podcast_id=podcast_a["id"]
+    )
+    second = await add_random(
+        3, wallabag, settings=get_settings(), podcast_id=podcast_b["id"]
+    )
+
+    assert first == 3
+    assert second == 2
+    with sqlite3.connect(get_db_path()) as conn:
+        a_staged = get_staged_episodes(conn, podcast_id=podcast_a["id"])
+        b_staged = get_staged_episodes(conn, podcast_id=podcast_b["id"])
+        assert [e["wallabag_id"] for e in a_staged] == [1, 2, 3]
+        assert [e["wallabag_id"] for e in b_staged] == [4, 5]
+
+
+async def test_generate_all_scoped_to_podcast(env, monkeypatch):
+    with sqlite3.connect(get_db_path()) as conn:
+        podcast_a = create_podcast(conn)
+        podcast_b = create_podcast(conn)
+        _insert_episode(
+            conn, 1, "Article One", status="staged", podcast_id=podcast_a["id"]
+        )
+        _insert_episode(
+            conn, 2, "Article Two", status="staged", podcast_id=podcast_a["id"]
+        )
+        b_id = _insert_episode(
+            conn, 3, "Article Three", status="staged", podcast_id=podcast_b["id"]
+        )
+
+    wallabag = _make_wallabag(_wallabag_ok_handler())
+    kokoro = _make_kokoro(lambda request: httpx.Response(200, content=b"FAKE_MP3"))
+    monkeypatch.setattr("app.pipeline.measure_duration", lambda audio_path: 60)
+
+    summary = await generate_all(
+        wallabag, kokoro, settings=get_settings(), podcast_id=podcast_a["id"]
+    )
+
+    assert summary == {"total": 2, "done": 2, "failed": 0, "skipped": 0}
+    with sqlite3.connect(get_db_path()) as conn:
+        a_rows = conn.execute(
+            "SELECT status FROM episodes WHERE podcast_id=?", (podcast_a["id"],)
+        ).fetchall()
+        b_rows = conn.execute(
+            "SELECT status FROM episodes WHERE podcast_id=?", (podcast_b["id"],)
+        ).fetchall()
+        assert [row[0] for row in a_rows] == ["done", "done"]
+        assert [row[0] for row in b_rows] == ["staged"]
+    assert not (env / "audio" / f"{b_id}.mp3").exists()
+
+
+def test_stats_scoped(env):
+    with sqlite3.connect(get_db_path()) as conn:
+        podcast_a = create_podcast(conn)
+        podcast_b = create_podcast(conn)
+        _insert_episode(
+            conn, 1, "Article One", status="staged", est_minutes=5,
+            podcast_id=podcast_a["id"],
+        )
+        _insert_episode(
+            conn, 2, "Article Two", status="staged", est_minutes=10,
+            podcast_id=podcast_a["id"],
+        )
+        _insert_episode(
+            conn, 3, "Article Three", status="done", duration_sec=120,
+            drive_id=7, podcast_id=podcast_a["id"],
+        )
+        _insert_episode(
+            conn, 4, "Article Four", status="done", duration_sec=60,
+            drive_id=8, podcast_id=podcast_b["id"],
+        )
+
+    assert stats(podcast_id=podcast_a["id"]) == {
+        "total_minutes": 17,
+        "articles": 3,
+        "staged": 2,
+        "done": 1,
+        "failed": 0,
+        "generating": 0,
+        "archived": 0,
+        "drive_id": 7,
+    }
+    assert stats() == {
+        "total_minutes": 18,
+        "articles": 4,
+        "staged": 2,
+        "done": 2,
+        "failed": 0,
+        "generating": 0,
+        "archived": 0,
+        "drive_id": 8,
+    }
+
+
+def test_clear_queue_scoped(env):
+    with sqlite3.connect(get_db_path()) as conn:
+        podcast_a = create_podcast(conn)
+        podcast_b = create_podcast(conn)
+        a_done = _insert_episode(
+            conn, 3, "Article Three", status="done", duration_sec=60,
+            drive_id=1, podcast_id=podcast_a["id"],
+        )
+        _insert_episode(
+            conn, 1, "Article One", status="staged", podcast_id=podcast_a["id"]
+        )
+        _insert_episode(
+            conn, 2, "Article Two", status="failed", podcast_id=podcast_a["id"]
+        )
+        b_staged = _insert_episode(
+            conn, 4, "Article Four", status="staged", podcast_id=podcast_b["id"]
+        )
+
+    assert clear_queue(podcast_id=podcast_a["id"]) == 2
+
+    with sqlite3.connect(get_db_path()) as conn:
+        rows = conn.execute("SELECT id, status FROM episodes ORDER BY id").fetchall()
+        assert [(row[0], row[1]) for row in rows] == [
+            (a_done, "done"),
+            (b_staged, "staged"),
+        ]
+
+
+def test_delete_podcast_orchestration(env):
+    """delete_podcast removes a podcast's rows, dedupe entries, audio files,
+    and stray .part files while leaving other podcasts untouched."""
+    with sqlite3.connect(get_db_path()) as conn:
+        podcast_a = create_podcast(conn)
+        podcast_b = create_podcast(conn)
+        done_1 = _insert_episode(
+            conn, 1, "Article One", status="done", duration_sec=60,
+            drive_id=1, podcast_id=podcast_a["id"],
+        )
+        done_2 = _insert_episode(
+            conn, 2, "Article Two", status="done", duration_sec=60,
+            drive_id=1, podcast_id=podcast_a["id"],
+        )
+        _insert_episode(
+            conn, 3, "Article Three", status="staged", podcast_id=podcast_a["id"]
+        )
+        done_4 = _insert_episode(
+            conn, 4, "Article Four", status="done", duration_sec=60,
+            drive_id=2, podcast_id=podcast_b["id"],
+        )
+        audio_dir = env / "audio"
+        audio_dir.mkdir(parents=True, exist_ok=True)
+        files = {
+            "mp3_1": audio_dir / f"{done_1}.mp3",
+            "mp3_2": audio_dir / f"{done_2}.mp3",
+            "part_1": audio_dir / f"{done_1}.mp3.part",
+            "mp3_b": audio_dir / f"{done_4}.mp3",
+        }
+        for path in files.values():
+            path.write_bytes(b"FAKE_MP3")
+        conn.execute(
+            "UPDATE episodes SET audio_path=? WHERE id=?", (str(files["mp3_1"]), done_1)
+        )
+        conn.execute(
+            "UPDATE episodes SET audio_path=? WHERE id=?", (str(files["mp3_2"]), done_2)
+        )
+        conn.execute(
+            "UPDATE episodes SET audio_path=? WHERE id=?", (str(files["mp3_b"]), done_4)
+        )
+        add_processed_article(conn, 1, done_1)
+        add_processed_article(conn, 2, done_2)
+        add_processed_article(conn, 4, done_4)
+        conn.commit()
+
+    result = delete_podcast(podcast_a["id"])
+
+    assert result == {
+        "name": podcast_a["name"],
+        "guid": podcast_a["guid"],
+        "episode_count": 3,
+    }
+    assert not files["mp3_1"].exists()
+    assert not files["mp3_2"].exists()
+    assert not files["part_1"].exists()
+    assert files["mp3_b"].exists()
+
+    with sqlite3.connect(get_db_path()) as conn:
+        remaining = conn.execute(
+            "SELECT id, status FROM episodes ORDER BY id"
+        ).fetchall()
+        assert [(row[0], row[1]) for row in remaining] == [(done_4, "done")]
+        assert _processed_ids(conn) == [4]
+        assert (
+            conn.execute("SELECT 1 FROM podcasts WHERE id=?", (podcast_a["id"],)).fetchone()
+            is None
+        )
+        assert (
+            conn.execute("SELECT 1 FROM podcasts WHERE id=?", (podcast_b["id"],)).fetchone()
+            is not None
+        )
+
+    with pytest.raises(ValueError, match="not found"):
+        delete_podcast(999)

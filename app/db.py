@@ -276,10 +276,10 @@ def get_podcasts(conn: sqlite3.Connection) -> list[dict]:
 def delete_podcast(conn: sqlite3.Connection, podcast_id: int) -> dict | None:
     """Delete a podcast and all of its episode and processed rows.
 
-    Returns ``{"id", "guid", "name", "episode_count", "audio_paths",
-    "wallabag_ids"}``, or None when the podcast id is unknown. The mp3 files
-    are deliberately NOT unlinked here; a later step orchestrates that with the
-    returned audio paths.
+    Returns ``{"id", "guid", "name", "episode_count", "episode_ids",
+    "audio_paths", "wallabag_ids"}``, or None when the podcast id is unknown.
+    The mp3 files are deliberately NOT unlinked here; a later step
+    orchestrates that with the returned episode ids and audio paths.
     """
     podcast = conn.execute(
         "SELECT id, guid, name FROM podcasts WHERE id=?", (podcast_id,)
@@ -287,11 +287,12 @@ def delete_podcast(conn: sqlite3.Connection, podcast_id: int) -> dict | None:
     if podcast is None:
         return None
     episodes = conn.execute(
-        "SELECT wallabag_id, audio_path, status FROM episodes WHERE podcast_id=?",
+        "SELECT id, wallabag_id, audio_path FROM episodes WHERE podcast_id=?",
         (podcast_id,),
     ).fetchall()
-    wallabag_ids = [row[0] for row in episodes]
-    audio_paths = [row[1] for row in episodes if row[1] is not None]
+    episode_ids = [row[0] for row in episodes]
+    wallabag_ids = [row[1] for row in episodes]
+    audio_paths = [row[2] for row in episodes if row[2] is not None]
     conn.execute("DELETE FROM episodes WHERE podcast_id=?", (podcast_id,))
     if wallabag_ids:
         placeholders = ",".join("?" for _ in wallabag_ids)
@@ -306,6 +307,7 @@ def delete_podcast(conn: sqlite3.Connection, podcast_id: int) -> dict | None:
         "guid": podcast[1],
         "name": podcast[2],
         "episode_count": len(episodes),
+        "episode_ids": episode_ids,
         "audio_paths": audio_paths,
         "wallabag_ids": wallabag_ids,
     }
@@ -529,9 +531,20 @@ def delete_processed_article(conn: sqlite3.Connection, wallabag_id: int) -> None
     conn.commit()
 
 
-def delete_staged_failed_episodes(conn: sqlite3.Connection) -> int:
-    """Delete all staged|failed episodes. Return rowcount."""
-    cur = conn.execute("DELETE FROM episodes WHERE status IN ('staged','failed')")
+def delete_staged_failed_episodes(
+    conn: sqlite3.Connection, podcast_id: int | None = None
+) -> int:
+    """Delete staged|failed episodes. Return rowcount.
+
+    When ``podcast_id`` is given, only that podcast's staged/failed episodes
+    are deleted; otherwise all staged/failed episodes are deleted.
+    """
+    where = "WHERE status IN ('staged','failed')"
+    params: tuple = ()
+    if podcast_id is not None:
+        where += " AND podcast_id=?"
+        params = (podcast_id,)
+    cur = conn.execute(f"DELETE FROM episodes {where}", params)
     conn.commit()
     return cur.rowcount
 
@@ -641,24 +654,49 @@ def set_setting(conn: sqlite3.Connection, key: str, value: str) -> None:
     conn.commit()
 
 
-def get_stats_rows(conn: sqlite3.Connection) -> dict:
+def get_stats_rows(
+    conn: sqlite3.Connection, podcast_id: int | None = None
+) -> dict:
     """Return the aggregates needed by :func:`app.pipeline.stats`.
 
     Shape: ``{"status_counts": {status: count}, "staged_minutes": int,
-    "done_seconds": int, "done_drive_id": int | None}``.
+    "done_seconds": int, "done_drive_id": int | None}``. When ``podcast_id``
+    is given the aggregates cover only that podcast's episodes; otherwise the
+    whole queue is summarized.
     """
+    status_where = ""
+    status_params: tuple = ()
+    if podcast_id is not None:
+        status_where = " WHERE podcast_id=?"
+        status_params = (podcast_id,)
     status_counts = {
         row[0]: row[1]
-        for row in conn.execute("SELECT status, COUNT(*) FROM episodes GROUP BY status")
+        for row in conn.execute(
+            f"SELECT status, COUNT(*) FROM episodes{status_where} GROUP BY status",
+            status_params,
+        )
     }
+    staged_where = "WHERE status='staged'"
+    staged_params: tuple = ()
+    if podcast_id is not None:
+        staged_where += " AND podcast_id=?"
+        staged_params = (podcast_id,)
     staged_minutes = conn.execute(
-        "SELECT COALESCE(SUM(est_minutes), 0) FROM episodes WHERE status='staged'"
+        f"SELECT COALESCE(SUM(est_minutes), 0) FROM episodes {staged_where}",
+        staged_params,
     ).fetchone()[0]
+    done_where = "WHERE status='done'"
+    done_params: tuple = ()
+    if podcast_id is not None:
+        done_where += " AND podcast_id=?"
+        done_params = (podcast_id,)
     done_seconds = conn.execute(
-        "SELECT COALESCE(SUM(duration_sec), 0) FROM episodes WHERE status='done'"
+        f"SELECT COALESCE(SUM(duration_sec), 0) FROM episodes {done_where}",
+        done_params,
     ).fetchone()[0]
     done_drive_id = conn.execute(
-        "SELECT MAX(drive_id) FROM episodes WHERE status='done'"
+        f"SELECT MAX(drive_id) FROM episodes {done_where}",
+        done_params,
     ).fetchone()[0]
     return {
         "status_counts": status_counts,
