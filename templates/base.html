@@ -5,17 +5,23 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{% block title %}{{ feed_title }}{% endblock %}</title>
   <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>☕</text></svg>">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Hanken+Grotesk:ital,wght@0,300..700;1,300..700&family=JetBrains+Mono:wght@400;500;600&family=Literata:ital,opsz,wght@0,7..72,200..900;1,7..72,200..900&family=Newsreader:ital,opsz,wght@0,6..72,200..800;1,6..72,200..800&display=swap">
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200&display=swap">
   <link rel="stylesheet" href="{{ static_url('css/style.css') }}">
 </head>
 <body>
   <header class="site-header">
-    <a class="brand" href="/">
-      <span class="brand-logo" aria-hidden="true">&#9749;</span>
-      <span class="brand-name">{{ feed_title }}</span>
-    </a>
-    <nav class="site-nav">
-      <a class="nav-gear" href="/settings" title="Settings" aria-label="Settings">&#9881;</a>
-    </nav>
+    <div class="site-header-inner">
+      <a class="brand" href="/">
+        <span class="brand-logo" aria-hidden="true"><span class="material-symbols-outlined" aria-hidden="true">coffee</span></span>
+        <span class="brand-name">{{ feed_title }}</span>
+      </a>
+      <nav class="site-nav">
+        <a class="nav-gear" href="/settings" title="Settings" aria-label="Settings"><span class="material-symbols-outlined" aria-hidden="true">tune</span></a>
+      </nav>
+    </div>
   </header>
 
   {% if message %}<div class="flash flash-message" role="status">{{ message }}</div>{% endif %}
@@ -24,6 +30,13 @@
   <main class="content">
     {% block content %}{% endblock %}
   </main>
+
+  <footer class="site-footer">
+    <div class="footer-inner">
+      <span class="footer-brand">{{ feed_title }} — Personal Digest</span>
+      <span class="footer-note">Personal audio edition</span>
+    </div>
+  </footer>
 
   <script src="{{ static_url('js/app.js') }}" defer></script>
 </body>

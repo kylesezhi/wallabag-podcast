@@ -2,12 +2,15 @@
 {% block title %}Remove Episode — {{ feed_title }}{% endblock %}
 {% block content %}
 <h1 class="page-title">Remove Episode</h1>
-<div class="card">
-  <p>Remove <strong>{{ title }}</strong> from the podcast?</p>
+<div class="card confirm-card">
+  <div class="modal-icon" aria-hidden="true"><span class="material-symbols-outlined">delete_outline</span></div>
+  <p class="confirm-text">Remove <strong>{{ title }}</strong> from the podcast?</p>
   <p class="section-hint">The article stays unread in Wallabag.</p>
-  <form method="post" action="/queue/{{ episode_id }}/delete" style="display:inline">
-    <button type="submit" class="btn btn-secondary">Remove</button>
-  </form>
-  <a href="/" style="margin-left:1rem">Cancel</a>
+  <div class="confirm-actions">
+    <form method="post" action="/queue/{{ episode_id }}/delete">
+      <button type="submit" class="btn btn-stop">Remove</button>
+    </form>
+    <a class="confirm-cancel" href="/">Cancel</a>
+  </div>
 </div>
 {% endblock %}

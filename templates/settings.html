@@ -5,21 +5,23 @@
 
 <div class="settings-grid">
   <section class="card settings-section">
-    <h2 class="section-heading">Wallabag Connection</h2>
-    <p class="connection-status">
-      Status:
-      {% if wallabag_ok %}
-      <span class="status-badge status-badge-done">connected</span>
-      {% else %}
-      <span class="status-badge status-badge-failed">not connected</span>
-      {% endif %}
-    </p>
+    <div class="settings-head">
+      <h2 class="section-heading">Wallabag Connection</h2>
+      <p class="connection-status">
+        <span class="connection-status-label">Status:</span>
+        {% if wallabag_ok %}
+        <span class="status-badge status-badge-done">connected</span>
+        {% else %}
+        <span class="status-badge status-badge-failed">not connected</span>
+        {% endif %}
+      </p>
+    </div>
     <dl class="podcast-meta">
       <dt>URL</dt>
-      <dd>{{ wallabag_url }}</dd>
+      <dd><code>{{ wallabag_url }}</code></dd>
     </dl>
     <p class="section-hint">Credentials live only in your <code>.env</code> file and are never shown here.</p>
-    <form method="post" action="/wallabag/test">
+    <form method="post" action="/wallabag/test" class="settings-action">
       <button type="submit" class="btn btn-secondary">Test Connection</button>
     </form>
   </section>
@@ -37,6 +39,7 @@
                  oninput="document.getElementById('articles_per_drive_value').textContent = this.value">
           <output id="articles_per_drive_value" class="range-value">{{ articles_per_drive }}</output>
         </div>
+        <div class="range-ticks" aria-hidden="true"><span>{{ articles_min }}</span><span>{{ articles_max }}</span></div>
       </div>
 
       <div class="field">

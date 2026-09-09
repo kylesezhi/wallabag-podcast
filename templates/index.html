@@ -3,8 +3,10 @@
 <div class="home-grid">
   <section class="drive-column">
     <div class="card drive-card">
+      <div class="drive-card-tint" aria-hidden="true"></div>
       <h1 class="drive-title">Today's Drive</h1>
       <p class="drive-status">
+        <span class="drive-status-dot" aria-hidden="true"></span>
         {% if generating %}Generating your drive&hellip;
         {% elif stats.staged + stats.failed > 0 %}Ready to generate
         {% elif stats.done > 0 %}Ready to listen
@@ -13,11 +15,12 @@
       <div class="drive-stats">
         <div class="stat">
           <span class="stat-value">{{ stats.total_minutes | human_duration }}</span>
+          <span class="stat-label">Total Length</span>
         </div>
         <div class="stat-divider" aria-hidden="true"></div>
         <div class="stat">
           <span class="stat-value">{{ stats.articles }}</span>
-          <span class="stat-label">articles</span>
+          <span class="stat-label">Articles</span>
         </div>
       </div>
       <form method="post" action="/queue/generate">
@@ -66,13 +69,13 @@
     </div>
     <ul class="queue-list">
       {% for ep in episodes %}
-      <li class="card queue-item status-{{ ep.status }}" data-status="{{ ep.status }}">
+      <li class="queue-item status-{{ ep.status }}" data-status="{{ ep.status }}">
         <div class="queue-item-body">
           <a class="queue-item-title" href="{{ wallabag_url.rstrip('/') }}/view/{{ ep.wallabag_id }}" target="_blank" rel="noopener noreferrer">{{ ep.title }}</a>
           <p class="queue-item-meta">
             <span class="queue-item-source">{{ ep.source }}</span>
             <span class="queue-item-minutes">
-              &#128337;
+              <span class="material-symbols-outlined" aria-hidden="true">schedule</span>
               {% if ep.status == "done" and ep.duration_sec is not none %}
               {{ (ep.duration_sec // 60) | human_duration }}
               {% else %}
@@ -92,11 +95,11 @@
         </div>
         {% if ep.status in ("staged", "failed", "done", "generating") %}
         <div class="queue-item-actions">
-          <form method="post" action="/queue/{{ ep.id }}/delete" data-confirm-message="{{ 'Delete this episode and remove its audio file? The article stays unread in Wallabag.' if ep.status == 'done' else 'Delete this episode from the podcast? The article stays unread in Wallabag.' }}" data-confirm-label="Delete">
-            <button type="submit" class="btn-delete" title="Delete from podcast" aria-label="Delete {{ ep.title }} from podcast">Delete</button>
-          </form>
           <form method="post" action="/queue/{{ ep.id }}/archive" data-confirm-message="Mark this article as read in Wallabag? The episode stays in your podcast." data-confirm-label="Archive">
-            <button type="submit" class="btn-archive" title="Archive in Wallabag" aria-label="Archive {{ ep.title }} in Wallabag">Archive</button>
+            <button type="submit" class="btn-archive" title="Archive in Wallabag" aria-label="Archive {{ ep.title }} in Wallabag"><span class="material-symbols-outlined" aria-hidden="true">inventory_2</span></button>
+          </form>
+          <form method="post" action="/queue/{{ ep.id }}/delete" data-confirm-message="{{ 'Delete this episode and remove its audio file? The article stays unread in Wallabag.' if ep.status == 'done' else 'Delete this episode from the podcast? The article stays unread in Wallabag.' }}" data-confirm-label="Delete">
+            <button type="submit" class="btn-delete" title="Delete from podcast" aria-label="Delete {{ ep.title }} from podcast"><span class="material-symbols-outlined" aria-hidden="true">delete</span></button>
           </form>
         </div>
         {% endif %}
@@ -133,16 +136,30 @@
       </dl>
       <p class="podcast-hint">Add this URL to your podcast app. Set <code>BASE_URL</code> to your LAN address to listen from your phone.</p>
     </div>
+    <section class="card waveform-card">
+      <div class="waveform-bars" aria-hidden="true">
+        <span class="wave-bar bar-1"></span>
+        <span class="wave-bar bar-2"></span>
+        <span class="wave-bar bar-3"></span>
+        <span class="wave-bar bar-4"></span>
+        <span class="wave-bar bar-5"></span>
+        <span class="wave-bar bar-6"></span>
+        <span class="wave-bar bar-7"></span>
+      </div>
+      <p class="waveform-title">Synthesizer Engine Active</p>
+      <p class="waveform-subtitle">Neural Text-to-Speech Ready</p>
+    </section>
   </aside>
 </div>
 
 <div class="modal-overlay" id="delete-modal" hidden>
   <div class="modal" role="dialog" aria-modal="true" aria-labelledby="delete-modal-title">
+    <div class="modal-icon" aria-hidden="true"><span class="material-symbols-outlined">delete_outline</span></div>
     <h3 class="modal-title" id="delete-modal-title">Are you sure?</h3>
     <p class="modal-body" id="delete-modal-body"></p>
     <div class="modal-actions">
-      <button type="button" class="btn btn-outline" id="delete-modal-cancel">Cancel</button>
       <button type="button" class="btn btn-stop" id="delete-modal-confirm">Delete</button>
+      <button type="button" class="btn btn-outline" id="delete-modal-cancel">Cancel</button>
     </div>
   </div>
 </div>
