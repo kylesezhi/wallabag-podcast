@@ -1,3 +1,4 @@
+- migrate to mise-en-place from just
 - generate multiple podcasts
 - default voice setting for all episodes, but configurable on per ep basis before generation
 - add by wallabag entry number
