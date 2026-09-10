@@ -25,6 +25,7 @@ from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, Stre
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
+from . import covers
 from .config import get_settings
 from .db import (
     connect,
@@ -444,6 +445,7 @@ async def podcast_delete(request: Request, guid: str):
         if task is not None and not task.done():
             task.cancel()
     result = delete_podcast(podcast["id"])
+    covers.invalidate(guid)
     return _json_or_redirect(
         request, "/", message=f"Deleted podcast {result['name']} ({result['episode_count']} episodes)"
     )
@@ -665,6 +667,37 @@ async def wallabag_test():
 async def podcast_feed(guid: str) -> Response:
     podcast = _get_podcast_or_404(guid)
     return Response(content=build_feed(podcast), media_type="application/rss+xml; charset=utf-8")
+
+
+@app.get("/podcast/{guid}/cover.png")
+async def podcast_cover(guid: str) -> Response:
+    """Serve a per-podcast cover with the podcast name rendered on it.
+
+    The first request renders the name onto the base artwork off the event
+    loop; repeat requests serve the in-memory cache. A render failure is
+    cosmetic — the pristine base cover is served instead so feeds keep
+    working.
+    """
+    podcast = _get_podcast_or_404(guid)
+    cached = covers.get_cached(guid)
+    if cached is not None:
+        png = cached
+    else:
+        try:
+            png = await asyncio.to_thread(covers.render_cover_png, podcast["name"])
+            covers.set_cached(guid, png)
+        except Exception:
+            logger.exception(
+                "Cover render failed for podcast %s (%s); serving base cover",
+                podcast["name"],
+                guid,
+            )
+            png = covers.base_cover_bytes()
+    return Response(
+        content=png,
+        media_type="image/png",
+        headers={"Cache-Control": "public, max-age=86400"},
+    )
 
 
 @app.get("/health")

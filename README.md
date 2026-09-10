@@ -157,13 +157,19 @@ local-network use only.
 
 ## Cover art
 
-The podcast uses a single cover image for the show and for every episode. The
-asset lives at `static/cover.png` (copied from `reference/cover.png`, the
-design source) and is served at `{BASE_URL}/static/cover.png`; the feed
-references it via the iTunes image element at both the channel and episode
-level, plus the legacy RSS `<image>` element. The image is 1254×1254, which is
-below Apple Podcasts' 1400px directory minimum, but it's valid RSS and fine
-for self-hosted LAN use.
+Each podcast gets its own cover: the podcast's name is rendered in white Pixel
+Operator 8 Bold (with a black outline) onto the shared 1254×1254 base artwork,
+drawn bottom-center. The base asset stays pristine at `static/cover.png`
+(also served at `{BASE_URL}/static/cover.png`) and is composited at request
+time; the per-podcast cover is served at `{BASE_URL}/podcast/{guid}/cover.png`
+and referenced by that podcast's feed via the iTunes image element at both the
+channel and episode level, plus the legacy RSS `<image>` element.
+
+Renders are cached in memory and re-created on first request after a restart.
+The Pixel Operator font is by Jayvee Enaguas (HarvettFox96), licensed CC0 1.0
+public domain; the font and its license are bundled under `app/assets/fonts/`.
+The image is 1254×1254, which is below Apple Podcasts' 1400px directory
+minimum, but it's valid RSS and fine for self-hosted LAN use.
 
 ## Seeking / range support
 

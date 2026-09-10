@@ -1,8 +1,9 @@
 """Podcast RSS 2.0 feed generation (with iTunes extensions).
 
 Builds a feed from done, non-archived episodes (newest generated first).
-Audio files are referenced at ``{BASE_URL}/audio/{id}.mp3``. The channel and
-each episode carry the cover art at ``{BASE_URL}/static/cover.png``.
+Audio files are referenced at ``{BASE_URL}/audio/{id}.mp3``. Each podcast's
+channel and episodes carry its own cover art — the podcast name rendered onto
+the base artwork — at ``{BASE_URL}/podcast/{guid}/cover.png``.
 
 Each podcast has its own feed addressed by GUID at
 ``{BASE_URL}/podcast/{guid}/feed.xml``: the podcast name is the channel title,
@@ -69,14 +70,14 @@ def build_feed(
     fg = FeedGenerator()
     fg.load_extension("podcast")
 
-    cover_url = f"{settings.BASE_URL}/static/cover.png"
-
     if podcast is None:
+        cover_url = f"{settings.BASE_URL}/static/cover.png"
         feed_url = f"{settings.BASE_URL}/feed.xml"
         alternate_url = f"{settings.BASE_URL}/"
         channel_title = settings.FEED_TITLE
         podcast_id = None
     else:
+        cover_url = f"{settings.BASE_URL}/podcast/{podcast['guid']}/cover.png"
         feed_url = f"{settings.BASE_URL}/podcast/{podcast['guid']}/feed.xml"
         alternate_url = f"{settings.BASE_URL}/podcast/{podcast['guid']}"
         channel_title = podcast["name"]

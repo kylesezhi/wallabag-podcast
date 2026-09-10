@@ -262,6 +262,10 @@ def test_podcast_feed_route(env):
     channel = root.find("channel")
     assert channel.find("title").text == podcast["name"]
     assert len(root.findall("channel/item")) == 1
+    # The feed advertises the per-podcast cover for the channel and the episode.
+    cover_url = f"{get_settings().BASE_URL}/podcast/{podcast['guid']}/cover.png"
+    assert channel.find("itunes:image", _NS).get("href") == cover_url
+    assert root.find("channel/item/itunes:image", _NS).get("href") == cover_url
 
 
 def test_static_cover_served(env):
@@ -301,11 +305,11 @@ def test_podcast_feed_channel_metadata(env):
     assert atom_link.get("href") == feed_url
     image = channel.find("image")
     assert image.find("title").text == podcast["name"]
-    assert image.find("url").text == f"{base_url}/static/cover.png"
+    assert image.find("url").text == f"{base_url}/podcast/{podcast['guid']}/cover.png"
     assert image.find("link").text == hub_url
     assert (
         channel.find("itunes:image", _NS).get("href")
-        == f"{base_url}/static/cover.png"
+        == f"{base_url}/podcast/{podcast['guid']}/cover.png"
     )
 
 
@@ -324,6 +328,18 @@ def test_podcast_feed_scoped_episodes(env):
     assert [item.find("title").text for item in p2_items] == ["P2 Only"]
 
 
+def test_podcast_feed_per_episode_cover_url(env):
+    with sqlite3.connect(get_db_path()) as conn:
+        podcast = create_podcast(conn)
+        _insert_done(conn, 1, "Episode", "2026-01-01T00:00:00+00:00",
+                     podcast_id=podcast["id"])
+
+    items = _feed_items(build_feed(podcast))
+    assert len(items) == 1
+    cover_url = f"{get_settings().BASE_URL}/podcast/{podcast['guid']}/cover.png"
+    assert items[0].find("itunes:image", _NS).get("href") == cover_url
+
+
 def test_podcast_feed_empty(env):
     with sqlite3.connect(get_db_path()) as conn:
         podcast = create_podcast(conn)
@@ -334,9 +350,12 @@ def test_podcast_feed_empty(env):
     base_url = get_settings().BASE_URL
     assert (
         channel.find("itunes:image", _NS).get("href")
-        == f"{base_url}/static/cover.png"
+        == f"{base_url}/podcast/{podcast['guid']}/cover.png"
     )
-    assert channel.find("image").find("url").text == f"{base_url}/static/cover.png"
+    assert (
+        channel.find("image").find("url").text
+        == f"{base_url}/podcast/{podcast['guid']}/cover.png"
+    )
 
 
 def test_legacy_feed_still_global(env):
