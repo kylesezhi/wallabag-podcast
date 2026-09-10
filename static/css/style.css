@@ -389,7 +389,7 @@ code {
 @media (min-width: 1024px) {
   .drive-card {
     display: grid;
-    grid-template-columns: minmax(0, 1fr) auto auto;
+    grid-template-columns: minmax(0, 1fr) auto;
     grid-template-rows: auto auto;
     column-gap: 1.75rem;
     row-gap: 0.5rem;
@@ -410,17 +410,17 @@ code {
   }
 
   .drive-card .drive-stats {
-    grid-column: 2;
-    grid-row: 1 / span 2;
-    align-self: center;
+    grid-column: 1 / -1;
+    grid-row: 4;
+    margin-top: 0.75rem;
     display: flex;
     align-items: center;
     gap: 1.75rem;
-    padding: 0 1.75rem;
-    border-top: none;
+    padding: 1rem 0 0;
+    border-top: 1px solid var(--hairline);
     border-bottom: none;
-    border-left: 1px solid var(--hairline);
-    border-right: 1px solid var(--hairline);
+    border-left: none;
+    border-right: none;
   }
 
   .drive-card .drive-stats .stat-divider {
@@ -437,14 +437,14 @@ code {
   }
 
   .drive-card form:nth-of-type(1) {
-    grid-column: 3;
-    grid-row: 1;
+    grid-column: 2;
+    grid-row: 2;
     align-self: center;
   }
 
   .drive-card form:nth-of-type(2) {
-    grid-column: 3;
-    grid-row: 2;
+    grid-column: 2;
+    grid-row: 3;
     align-self: center;
   }
 
@@ -1780,8 +1780,8 @@ a.queue-item-title:hover {
   }
 }
 
-/* Desktop hero: label above the title, status below it, stats + buttons keep
- * their columns. Overrides the pre-hub drive-card grid rows. */
+/* Desktop hero: label above the title, status below it, buttons stacked on the
+ * right, stats as a full-width band below. Overrides the pre-hub drive-card grid rows. */
 @media (min-width: 1024px) {
   .drive-card .hero-label {
     grid-column: 1;
@@ -1796,10 +1796,6 @@ a.queue-item-title:hover {
 
   .drive-card .drive-status {
     grid-row: 3;
-  }
-
-  .drive-card .drive-stats {
-    grid-row: 1 / span 3;
   }
 }
 
