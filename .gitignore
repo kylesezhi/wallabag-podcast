@@ -8,6 +8,9 @@ data/audio/*
 # Secrets — never commit
 .env
 
+# mise personal overrides
+mise.local.toml
+
 # Python
 __pycache__/
 *.pyc

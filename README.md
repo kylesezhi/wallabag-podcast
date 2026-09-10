@@ -21,8 +21,8 @@ Wallabag state.
 
 ## Prerequisites
 
-- **Python 3.11+** and **[uv](https://docs.astral.sh/uv/)** (or **Docker** for
-  the containerized setup)
+- **[mise](https://mise.jdx.dev/)** — pins and installs the project's Python and
+  uv (or use **Docker** for the containerized setup)
 - A **Wallabag** instance (self-hosted or https://app.wallabag.it) with API
   credentials enabled — get `CLIENT_ID` / `CLIENT_SECRET` from your
   instance's *Developer* / *API clients* settings page
@@ -44,7 +44,7 @@ docker run -p 8880:8880 ghcr.io/remsky/kokoro-fastapi-cpu:latest
 Then run the app:
 
 ```bash
-just run                    # or: uv run uvicorn app.main:app --reload
+mise run start              # or: uv run uvicorn app.main:app --reload
 ```
 
 Open <http://127.0.0.1:8000> — you should see your podcast hub. First start
@@ -175,7 +175,7 @@ unsatisfiable ranges get a `416 Range Not Satisfiable`.
 ## Development
 
 ```bash
-just test                  # or: uv run pytest -q
+mise run test               # or: uv run pytest -q
 ```
 
 Project layout:
