@@ -1,18 +1,23 @@
 # wallabag-podcast
 
 A single-user, self-hosted web app that turns your Wallabag saved articles
-into a podcast: it pulls random unread articles into an editable queue,
-synthesizes each one into an MP3 "episode" with Kokoro-FastAPI text-to-speech,
-and serves them through a podcast RSS feed you can subscribe to in any podcast
-app.
+into podcasts: create any number of randomly named podcasts, pull random
+unread articles into each podcast's editable queue, synthesize each one into
+an MP3 "episode" with Kokoro-FastAPI text-to-speech, and serve them through a
+per-podcast RSS feed you can subscribe to in any podcast app. An article never
+repeats — once picked or generated for one podcast, it is excluded from every
+podcast.
 
 ## What it does
 
-A queue-driven workflow: fetch N random unread Wallabag articles → review and
-edit the queue (drop the ones you don't want) → generate one MP3 per article
-via Kokoro TTS → subscribe to the resulting podcast feed. Each episode is a
-spoken title intro followed by the article body. There is no scheduler in v1 —
-everything is manual, and the app never mutates your Wallabag state.
+A podcast hub: the home page opens your newest podcast, header tabs switch
+between podcasts, and **New Podcast** adds another (randomly named). Each
+podcast is an independent feed with its own queue: fetch N random unread
+Wallabag articles → review and edit the queue (drop the ones you don't want) →
+generate one MP3 per article via Kokoro TTS → subscribe to that podcast's
+feed. Each episode is a spoken title intro followed by the article body. There
+is no scheduler in v1 — everything is manual, and the app never mutates your
+Wallabag state.
 
 ## Prerequisites
 
@@ -42,8 +47,9 @@ Then run the app:
 just run                    # or: uv run uvicorn app.main:app --reload
 ```
 
-Open <http://127.0.0.1:8000> — you should see the empty queue page. Click
-**Settings** → **Test Connection** to verify Wallabag is reachable.
+Open <http://127.0.0.1:8000> — you should see your podcast hub. First start
+creates one randomly named podcast automatically. Click **Settings** →
+**Test Connection** to verify Wallabag is reachable.
 
 ## Docker setup
 
@@ -83,19 +89,28 @@ Copy `.env.example` to `.env` and fill it in. All variables:
 | `EXCLUDE_TAGS` | Comma-separated Wallabag tags to skip when picking random articles (e.g. `computer,interactive`). |
 | `MIN_TEXT_CHARS` | Minimum cleaned-text length for an article to be worth narrating; shorter articles are skipped (default `200`). |
 | `MAX_FETCH_PAGES` | Safety cap on pages fetched while enumerating unread candidates (default `50`). |
-| `FEED_TITLE` | Podcast feed title shown in podcast apps. |
+| `FEED_TITLE` | App/brand title shown in the header, footer, and settings page (not an RSS title — each podcast feed is titled by its podcast name). |
 
 Wallabag credentials are OAuth password-grant values — they never appear in
 the UI or the database, only in `.env`.
 
 ## Using the app
 
-1. Open the home page. Click **Add Random** to stage N random unread articles
-   (N is set under **Settings** → *Articles per drive*, default 10).
+The home page opens the newest podcast. The header shows a tab per podcast
+(the active one is highlighted); **New Podcast** creates another randomly
+named podcast, and **Delete Podcast** on a podcast page removes that feed and
+all of its episodes. Each podcast is independent — its own queue, its own
+feed, its own subscription URL — and the article pool is shared: an article
+staged or generated for one podcast is never offered to another.
+
+1. On a podcast's page, click **Add N Random Articles** to stage N random
+   unread articles into that podcast (N is set under **Settings** → *Articles
+   per drive*, default 10).
 2. Review the queue. Each episode has two buttons:
    - **Delete** removes the episode from the podcast (deletes the queue row and,
      for finished episodes, the MP3 file and dedupe record). The article stays
-     unread in Wallabag and can be re-picked by **Add Random** later.
+     unread in Wallabag and can be re-picked by **Add N Random Articles**
+     later.
    - **Archive** marks the article as read in Wallabag. The episode stays in the
      podcast (MP3 and RSS entry untouched).
 3. Click **Generate Audio** — each article is fetched, cleaned, and
@@ -121,11 +136,19 @@ the UI or the database, only in `.env`.
    Generating** directly. **Archive** on a generating episode just marks the
    article read without affecting the generation loop.
 
+## Upgrading from the single-podcast version
+
+Booting this version against an existing data directory performs a one-time
+fresh start: episodes and generated audio are wiped, your settings are kept,
+and one randomly named podcast is created automatically. After that, deleting
+the last podcast is allowed — the app simply shows a "New Podcast" screen.
+
 ## Subscribing in a podcast app
 
-The feed URL is `{BASE_URL}/feed.xml` (shown on the home page). Add it to any
-podcast app — Apple Podcasts, Podcast Addict, AntennaPod, etc. — as an RSS
-feed.
+Each podcast has its own feed URL, `{BASE_URL}/podcast/{guid}/feed.xml` (shown
+on that podcast's page with a copy button). Add it to any podcast app — Apple
+Podcasts, Podcast Addict, AntennaPod, etc. — as an RSS feed. The old global
+`{BASE_URL}/feed.xml` feed no longer exists.
 
 For phone listening on the same LAN, set `BASE_URL` to your computer's LAN IP
 (e.g. `http://192.168.1.50:8000`) and bind `HOST=0.0.0.0` (or use the Docker
@@ -159,15 +182,16 @@ Project layout:
 
 ```
 app/
-  main.py        # FastAPI app, routes, lifespan (UI + queue + feed + audio)
+  main.py        # FastAPI app, routes, lifespan (hub, per-podcast feeds, scoped queue actions, audio)
   config.py      # pydantic-settings Settings — secrets + defaults from .env
   db.py          # SQLite connection, schema init, repository functions
+  naming.py      # weighted random podcast name generator (pure module)
   wallabag.py    # WallabagClient: oauth, list metadata, get entry
   kokoro.py      # KokoroClient: voices, synthesize -> mp3 bytes
   textclean.py   # HTML -> clean spoken text + intro assembly
   pipeline.py    # orchestration: queue ops, generate flow
   rss.py         # build podcast feed from episodes
-templates/       # Jinja2: base, index (drive+queue), settings
+templates/       # Jinja2: base, index (podcast hub: tabs, hero, episodes, other podcasts, subscription), settings
 static/          # css, js, images
 tests/           # pytest suite
 ```
@@ -176,11 +200,11 @@ tests/           # pytest suite
 
 FastAPI serves a server-rendered UI backed by a thin SQLite repository. The
 pipeline fetches unread article metadata from the **Wallabag API**, filters
-exclusions (tags, already-processed articles), and stages random picks. During
+exclusions (tags, already-processed articles — the dedupe pool is global
+across podcasts), and stages random picks into the active podcast. During
 generation each staged episode's full entry is fetched, cleaned from HTML into
 spoken text, and sent to **Kokoro-FastAPI**, which returns an MP3 written to
 `DATA_DIR/audio/{id}.mp3`; duration is measured and the episode is marked
-done. The **RSS feed** (built with feedgen) references those files at
-`{BASE_URL}/audio/{id}.mp3`, which the range-aware audio route serves.
-All queue/processed tracking is local to SQLite — Wallabag state is never
-mutated.
+done. Each **RSS feed** (built with feedgen) references those files at
+`{BASE_URL}/audio/{id}.mp3`, which the range-aware audio route serves. All
+queue/processed tracking is local to SQLite — Wallabag state is never mutated.
