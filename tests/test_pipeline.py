@@ -28,6 +28,8 @@ from app.kokoro import KokoroClient
 from app.logging_setup import configure_logging
 from app.pipeline import (
     _gap_silence,
+    _parse_wallabag_ref,
+    add_article,
     add_random,
     archive_item,
     clear_queue,
@@ -839,6 +841,144 @@ async def test_add_random_idempotent(env, monkeypatch):
     assert second == 2
     with sqlite3.connect(get_db_path()) as conn:
         assert _staged_wallabag_ids(conn) == [1, 2, 3, 4, 5]
+
+
+# ---------------------------------------------------------------------------
+# Queue operations: add_article (stage a single article by URL or id)
+# ---------------------------------------------------------------------------
+
+
+def _single_entry_handler(entry_id: int, **payload_overrides):
+    """MockTransport handler serving /api/entries/{id}.json with one entry."""
+    item = _entry_payload(entry_id, _long_content())
+    item.update(payload_overrides)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/oauth/v2/token":
+            return httpx.Response(200, json=_token_response())
+        if request.url.path == f"/api/entries/{entry_id}.json":
+            return httpx.Response(200, json=item)
+        return httpx.Response(404)
+
+    return handler
+
+
+@pytest.mark.parametrize(
+    "ref",
+    [
+        "2793",
+        "  2793  ",
+        "http://192.168.42.223:8000/view/2793",
+        "http://192.168.42.223:8000/view/2793/",
+        "https://wallabag.example.test/view/2793?search=foo#frag",
+    ],
+)
+def test_parse_wallabag_ref_accepts(ref):
+    assert _parse_wallabag_ref(ref) == 2793
+
+
+@pytest.mark.parametrize(
+    "ref",
+    ["", "   ", "abc", "view/2793", "/view/", "/view/abc", "http://x/view/2793x"],
+)
+def test_parse_wallabag_ref_rejects(ref):
+    with pytest.raises(ValueError, match="Not a Wallabag article URL"):
+        _parse_wallabag_ref(ref)
+
+
+async def test_add_article_stages_from_url(env):
+    with sqlite3.connect(get_db_path()) as conn:
+        podcast_id = create_podcast(conn)["id"]
+    wallabag = _make_wallabag(_single_entry_handler(2793, title="Deep Dive"))
+
+    title = await add_article(
+        "http://192.168.42.223:8000/view/2793",
+        wallabag,
+        settings=get_settings(),
+        podcast_id=podcast_id,
+    )
+
+    assert title == "Deep Dive"
+    with sqlite3.connect(get_db_path()) as conn:
+        row = conn.execute(
+            "SELECT title, source, url, est_minutes, language, status, podcast_id "
+            "FROM episodes WHERE wallabag_id=2793"
+        ).fetchone()
+    assert row == ("Deep Dive", "example.com", "https://example.com/2793", 5, "en", "staged", podcast_id)
+
+
+async def test_add_article_stages_from_bare_id(env):
+    wallabag = _make_wallabag(_single_entry_handler(42))
+
+    title = await add_article("42", wallabag, settings=get_settings())
+
+    assert title == "Article 42"
+    with sqlite3.connect(get_db_path()) as conn:
+        row = conn.execute("SELECT wallabag_id, podcast_id FROM episodes").fetchone()
+    assert row == (42, None)
+
+
+async def test_add_article_allows_archived(env):
+    wallabag = _make_wallabag(_single_entry_handler(7, is_archived=1))
+
+    title = await add_article("7", wallabag, settings=get_settings())
+
+    assert title == "Article 7"
+    with sqlite3.connect(get_db_path()) as conn:
+        assert conn.execute("SELECT 1 FROM episodes WHERE wallabag_id=7").fetchone()
+
+
+async def test_add_article_bypasses_exclude_tags(env):
+    wallabag = _make_wallabag(
+        _single_entry_handler(7, tags=[{"id": 1, "slug": "computer", "title": "Computer"}])
+    )
+
+    await add_article("7", wallabag, settings=_settings(EXCLUDE_TAGS=["computer"]))
+
+    with sqlite3.connect(get_db_path()) as conn:
+        assert conn.execute("SELECT 1 FROM episodes WHERE wallabag_id=7").fetchone()
+
+
+async def test_add_article_rejects_same_podcast_duplicate(env):
+    with sqlite3.connect(get_db_path()) as conn:
+        podcast_id = create_podcast(conn)["id"]
+        _insert_episode(conn, 7, "Article Seven", podcast_id=podcast_id)
+    wallabag = _make_wallabag(_single_entry_handler(7))
+
+    with pytest.raises(ValueError, match="already in this podcast"):
+        await add_article("7", wallabag, settings=get_settings(), podcast_id=podcast_id)
+
+
+async def test_add_article_rejects_other_podcast_duplicate(env):
+    with sqlite3.connect(get_db_path()) as conn:
+        other_id = create_podcast(conn)["id"]
+        target_id = create_podcast(conn)["id"]
+        _insert_episode(conn, 7, "Article Seven", podcast_id=other_id)
+    wallabag = _make_wallabag(_single_entry_handler(7))
+
+    with pytest.raises(ValueError, match="already staged in another podcast"):
+        await add_article("7", wallabag, settings=get_settings(), podcast_id=target_id)
+
+
+async def test_add_article_rejects_already_generated(env):
+    with sqlite3.connect(get_db_path()) as conn:
+        add_processed_article(conn, 7, 999)
+    wallabag = _make_wallabag(_single_entry_handler(7))
+
+    with pytest.raises(ValueError, match="already generated"):
+        await add_article("7", wallabag, settings=get_settings())
+
+
+async def test_add_article_not_found_raises(env):
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/oauth/v2/token":
+            return httpx.Response(200, json=_token_response())
+        return httpx.Response(404)
+
+    wallabag = _make_wallabag(handler)
+
+    with pytest.raises(WallabagError, match="Article 404 not found"):
+        await add_article("http://x/view/404", wallabag, settings=get_settings())
 
 
 # ---------------------------------------------------------------------------

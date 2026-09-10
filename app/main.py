@@ -45,6 +45,7 @@ from .db import (
 from .kokoro import KokoroClient
 from .logging_setup import configure_logging
 from .pipeline import (
+    add_article,
     add_random,
     archive_item,
     clear_queue,
@@ -496,6 +497,22 @@ async def podcast_add_random(guid: str):
     if count == 0:
         return _redirect(f"/podcast/{guid}", message="No new articles to add")
     return _redirect(f"/podcast/{guid}", message=f"Added {count} random articles")
+
+
+@app.post("/podcast/{guid}/queue/add-article")
+async def podcast_add_article(request: Request, guid: str):
+    podcast = _get_podcast_or_404(guid)
+    form = await request.form()
+    ref = str(form.get("url", "")).strip()
+    if not ref:
+        return _redirect(f"/podcast/{guid}", error="Paste a Wallabag article URL or ID")
+    try:
+        title = await add_article(
+            ref, app.state.wallabag_client, get_settings(), podcast_id=podcast["id"]
+        )
+    except (ValueError, WallabagError) as exc:
+        return _redirect(f"/podcast/{guid}", error=str(exc))
+    return _redirect(f"/podcast/{guid}", message=f'Added "{title}"')
 
 
 @app.post("/podcast/{guid}/queue/generate")

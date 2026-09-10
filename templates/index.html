@@ -57,6 +57,10 @@
       <form method="post" action="/podcast/{{ podcast.guid }}/queue/add-random">
         <button type="submit" class="btn btn-secondary btn-block">Add {{ articles_per_drive }} Random Articles</button>
       </form>
+      <form method="post" action="/podcast/{{ podcast.guid }}/queue/add-article" class="add-article-form">
+        <input type="text" name="url" class="add-article-input" placeholder="Paste Wallabag article URL or ID&hellip;" aria-label="Wallabag article URL or ID" autocomplete="off">
+        <button type="submit" class="btn btn-secondary btn-block">Add Article</button>
+      </form>
     </div>
 
     {% if generating %}
@@ -136,7 +140,7 @@
     <p class="queue-no-match" id="queue-no-match" hidden>No episodes match your filters.</p>
     {% else %}
     <div class="card queue-empty">
-      <p>No articles in the queue yet — it's empty. Use <strong>Add {{ articles_per_drive }} Random Articles</strong> to stage a few articles.</p>
+      <p>No articles in the queue yet — it's empty. Use <strong>Add {{ articles_per_drive }} Random Articles</strong>, or paste a Wallabag article URL above to stage it, to add a few articles.</p>
     </div>
     {% endif %}
 

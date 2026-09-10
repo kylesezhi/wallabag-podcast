@@ -320,6 +320,17 @@ def test_home_article_links_to_wallabag(client):
     assert 'rel="noopener noreferrer"' in response.text
 
 
+def test_hub_shows_add_article_form(client):
+    podcast = _podcast()
+
+    response = client.get(f"/podcast/{podcast['guid']}")
+
+    assert response.status_code == 200
+    assert f'action="/podcast/{podcast["guid"]}/queue/add-article"' in response.text
+    assert 'name="url"' in response.text
+    assert "Add Article" in response.text
+
+
 def test_home_shows_done_with_duration(client):
     podcast = _podcast()
     with sqlite3.connect(get_db_path()) as conn:
@@ -753,6 +764,144 @@ def test_add_random_unknown_podcast_404(client, monkeypatch):
     monkeypatch.setattr("app.main.add_random", mock_add_random)
 
     response = client.post("/podcast/ffffffff/queue/add-random", follow_redirects=False)
+
+    assert response.status_code == 404
+
+
+def test_add_article_success(client, monkeypatch):
+    podcast = _podcast()
+    seen = {}
+
+    async def mock_add_article(ref, wallabag_client, settings, podcast_id=None):
+        seen["ref"] = ref
+        seen["podcast_id"] = podcast_id
+        conn = connect()
+        try:
+            conn.execute(
+                "INSERT INTO episodes (wallabag_id, title, source, url, status, "
+                "est_minutes, language, created_at, podcast_id) VALUES "
+                "(?, ?, ?, ?, 'staged', 5, 'en', '2026-01-01T00:00:00+00:00', ?)",
+                (999, "Mocked Article", "example.com", "https://example.com", podcast_id),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+        return "Mocked Article"
+
+    monkeypatch.setattr("app.main.add_article", mock_add_article)
+
+    response = client.post(
+        f"/podcast/{podcast['guid']}/queue/add-article",
+        data={"url": "http://192.168.42.223:8000/view/2793"},
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 303
+    assert response.headers["location"].startswith(f"/podcast/{podcast['guid']}?")
+    assert "message" in response.headers["location"]
+    assert "Mocked+Article" in response.headers["location"]
+    assert seen == {"ref": "http://192.168.42.223:8000/view/2793", "podcast_id": podcast["id"]}
+
+    with sqlite3.connect(get_db_path()) as conn:
+        row = conn.execute(
+            "SELECT title, podcast_id FROM episodes WHERE wallabag_id=999"
+        ).fetchone()
+    assert row is not None
+    assert row[0] == "Mocked Article"
+    assert row[1] == podcast["id"]
+
+
+def test_add_article_strips_whitespace(client, monkeypatch):
+    podcast = _podcast()
+    seen = {}
+
+    async def mock_add_article(ref, wallabag_client, settings, podcast_id=None):
+        seen["ref"] = ref
+        return "T"
+
+    monkeypatch.setattr("app.main.add_article", mock_add_article)
+
+    response = client.post(
+        f"/podcast/{podcast['guid']}/queue/add-article",
+        data={"url": "  2793  "},
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 303
+    assert seen["ref"] == "2793"
+
+
+def test_add_article_value_error(client, monkeypatch):
+    podcast = _podcast()
+
+    async def mock_add_article(ref, wallabag_client, settings, podcast_id=None):
+        raise ValueError('"Deep Dive" is already in this podcast')
+
+    monkeypatch.setattr("app.main.add_article", mock_add_article)
+
+    response = client.post(
+        f"/podcast/{podcast['guid']}/queue/add-article",
+        data={"url": "2793"},
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 303
+    assert response.headers["location"].startswith(f"/podcast/{podcast['guid']}?")
+    assert "error" in response.headers["location"]
+    assert "already+in+this+podcast" in response.headers["location"]
+
+
+def test_add_article_wallabag_error(client, monkeypatch):
+    from app.wallabag import WallabagError
+
+    podcast = _podcast()
+
+    async def mock_add_article(ref, wallabag_client, settings, podcast_id=None):
+        raise WallabagError("Article 2793 not found in Wallabag")
+
+    monkeypatch.setattr("app.main.add_article", mock_add_article)
+
+    response = client.post(
+        f"/podcast/{podcast['guid']}/queue/add-article",
+        data={"url": "2793"},
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 303
+    assert response.headers["location"].startswith(f"/podcast/{podcast['guid']}?")
+    assert "error" in response.headers["location"]
+
+
+def test_add_article_empty_field(client, monkeypatch):
+    podcast = _podcast()
+
+    async def mock_add_article(ref, wallabag_client, settings, podcast_id=None):
+        raise AssertionError("add_article must not run for an empty field")
+
+    monkeypatch.setattr("app.main.add_article", mock_add_article)
+
+    response = client.post(
+        f"/podcast/{podcast['guid']}/queue/add-article",
+        data={"url": "   "},
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 303
+    assert response.headers["location"].startswith(f"/podcast/{podcast['guid']}?")
+    assert "error" in response.headers["location"]
+
+
+def test_add_article_unknown_podcast_404(client, monkeypatch):
+    async def mock_add_article(ref, wallabag_client, settings, podcast_id=None):
+        raise AssertionError("add_article must not run for an unknown podcast")
+
+    monkeypatch.setattr("app.main.add_article", mock_add_article)
+
+    response = client.post(
+        "/podcast/ffffffff/queue/add-article",
+        data={"url": "2793"},
+        follow_redirects=False,
+    )
 
     assert response.status_code == 404
 

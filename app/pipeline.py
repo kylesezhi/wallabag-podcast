@@ -28,10 +28,12 @@ import contextlib
 import logging
 import os
 import random
+import re
 import sqlite3
 from functools import lru_cache
 from importlib import resources
 from pathlib import Path
+from urllib.parse import urlparse
 
 from .config import Settings, get_settings
 from .db import (
@@ -119,6 +121,78 @@ async def add_random(
         return count
     finally:
         conn.close()
+
+
+# A Wallabag view URL path looks like /view/2793 (trailing slash tolerated).
+_VIEW_PATH_RE = re.compile(r"^/view/(\d+)/?$")
+_BARE_ID_RE = re.compile(r"^\d+$")
+
+
+def _parse_wallabag_ref(ref: str) -> int:
+    """Parse a Wallabag view URL or bare entry id into an entry id.
+
+    Accepts a bare numeric id (``"2793"``) or a Wallabag view URL of any host
+    whose path is ``/view/{id}`` — trailing slash, query string, and fragment
+    are ignored, e.g. ``"http://192.168.42.223:8000/view/2793"``. Raises
+    ``ValueError`` for anything else.
+    """
+    value = (ref or "").strip()
+    if _BARE_ID_RE.match(value):
+        return int(value)
+    match = _VIEW_PATH_RE.match(urlparse(value).path)
+    if match:
+        return int(match.group(1))
+    raise ValueError(
+        "Not a Wallabag article URL — paste the /view/… URL or an entry ID"
+    )
+
+
+async def add_article(
+    ref: str,
+    wallabag_client: WallabagClient,
+    settings: Settings | None = None,
+    podcast_id: int | None = None,
+) -> str:
+    """Stage a single Wallabag article given a view URL or entry id.
+
+    Unlike ``add_random`` this is an explicit user action: archived (read)
+    articles are allowed and ``EXCLUDE_TAGS`` does not apply. The article is
+    rejected when it is already an episode (in this podcast or another) or was
+    already generated before. Returns the staged article's title (for the UI
+    flash). Raises ``ValueError`` for bad input/duplicates and
+    ``WallabagError`` when the Wallabag fetch fails.
+    """
+    entry_id = _parse_wallabag_ref(ref)
+    article = await wallabag_client.get_entry(entry_id)
+    label = article.title or f"Article {entry_id}"
+
+    conn = connect()
+    try:
+        row = conn.execute(
+            "SELECT podcast_id FROM episodes WHERE wallabag_id=?", (entry_id,)
+        ).fetchone()
+        if row is not None:
+            if podcast_id is not None and row[0] == podcast_id:
+                raise ValueError(f'"{label}" is already in this podcast')
+            raise ValueError(f'"{label}" is already staged in another podcast')
+        if conn.execute(
+            "SELECT 1 FROM processed_articles WHERE wallabag_id=?", (entry_id,)
+        ).fetchone() is not None:
+            raise ValueError(f'"{label}" was already generated')
+
+        insert_staged_episode(
+            conn,
+            article.id,
+            article.title,
+            article.domain_name,
+            article.url,
+            article.reading_time,
+            article.language,
+            podcast_id=podcast_id,
+        )
+    finally:
+        conn.close()
+    return label
 
 
 def delete_item(episode_id: int) -> None:

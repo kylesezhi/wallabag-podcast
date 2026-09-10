@@ -295,6 +295,37 @@ def test_get_entry_returns_full_content():
     assert entry.is_starred is False
 
 
+@pytest.mark.parametrize("status", [404, 500])
+def test_get_entry_error_status_raises(status):
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/oauth/v2/token":
+            return httpx.Response(200, json=_token_response())
+        return httpx.Response(status, text="boom")
+
+    client = _make_client(handler)
+
+    async def _go():
+        return await client.get_entry(42)
+
+    with pytest.raises(WallabagError):
+        asyncio_run(_go())
+
+
+def test_get_entry_not_found_message():
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/oauth/v2/token":
+            return httpx.Response(200, json=_token_response())
+        return httpx.Response(404)
+
+    client = _make_client(handler)
+
+    async def _go():
+        return await client.get_entry(42)
+
+    with pytest.raises(WallabagError, match="Article 42 not found in Wallabag"):
+        asyncio_run(_go())
+
+
 # ---------------------------------------------------------------------------
 # 4b. archive (PATCH archive=1)
 # ---------------------------------------------------------------------------

@@ -105,7 +105,12 @@ staged or generated for one podcast is never offered to another.
 
 1. On a podcast's page, click **Add N Random Articles** to stage N random
    unread articles into that podcast (N is set under **Settings** → *Articles
-   per drive*, default 10).
+   per drive*, default 10). To stage one specific article instead, paste its
+   Wallabag view URL (e.g. `http://192.168.42.223:8000/view/2793`) or just the
+   entry ID into the field below and click **Add Article**. Explicit adds
+   ignore the exclude-tags filter and may target articles already marked read
+   in Wallabag; an article already staged in a podcast or generated before is
+   refused with a notice.
 2. Review the queue. Each episode has two buttons:
    - **Delete** removes the episode from the podcast (deletes the queue row and,
      for finished episodes, the MP3 file and dedupe record). The article stays

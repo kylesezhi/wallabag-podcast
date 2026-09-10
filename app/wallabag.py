@@ -297,10 +297,22 @@ class WallabagClient:
         return items
 
     async def get_entry(self, entry_id: int) -> ArticleFull:
-        """Fetch a single full article including its HTML content."""
+        """Fetch a single full article including its HTML content.
+
+        Raises :class:`WallabagError` when the entry does not exist (404) or
+        the API returns any other error status — a missing entry must never
+        be parsed into a bogus empty article.
+        """
         base = self._settings.WALLABAG_URL.rstrip("/")
         url = f"{base}/api/entries/{entry_id}.json"
         resp = await self._request("GET", url)
+        if resp.status_code == 404:
+            raise WallabagError(f"Article {entry_id} not found in Wallabag")
+        if resp.status_code >= 300:
+            raise WallabagError(
+                f"Wallabag get_entry({entry_id}) failed with status "
+                f"{resp.status_code}: {resp.text[:200]}"
+            )
         payload = resp.json()
         return self._parse_full(payload)
 
