@@ -1,7 +1,7 @@
 ---
 plan name: multi-podcast-hub
 plan description: Randomly named podcast feeds
-plan status: active
+plan status: done
 ---
 
 ## Idea
