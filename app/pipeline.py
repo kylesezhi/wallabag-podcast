@@ -16,8 +16,11 @@
   append the bytes straight to ``DATA_DIR/audio/{id}.mp3.part`` (constant RAM;
   chunk progress is persisted for the UI), atomically rename the finished part
   file to ``{id}.mp3``, record the summed per-chunk duration, and mark the
-  episode ``done`` (recording a processed_articles row). Failures are
-  isolated per episode: a bad article marks that episode ``failed`` and the run
+  episode ``done`` (recording a processed_articles row). When the article has
+  section titles, ID3v2 chapter markers are embedded into the finished MP3 —
+  an intro chapter at 0:00 titled by the episode, then one chapter per section
+  title timed from the cumulative per-chunk durations. Failures are isolated
+  per episode: a bad article marks that episode ``failed`` and the run
   continues with the next one.
 """
 
@@ -35,6 +38,7 @@ from importlib import resources
 from pathlib import Path
 from urllib.parse import urlparse
 
+from .chapters import write_id3_chapters
 from .config import Settings, get_settings
 from .db import (
     add_processed_article,
@@ -57,9 +61,15 @@ from .db import (
     set_episode_generating,
     set_episode_progress,
 )
-from .kokoro import KokoroClient, KokoroError, measure_duration
+from .kokoro import KokoroClient, KokoroError, measure_duration_seconds
 from .kokoro import measure_duration as _measure_asset_duration
-from .textclean import SkipArticle, build_tts_input_from_article, split_tts_text
+from .textclean import (
+    SkipArticle,
+    build_tts_input_from_article_with_sections,
+    has_section_mark,
+    split_tts_text,
+    strip_section_mark,
+)
 from .wallabag import WallabagClient, WallabagError
 
 logger = logging.getLogger(__name__)
@@ -427,6 +437,8 @@ async def _synthesize_chunks(
     chunks: list[str],
     voice: str,
     gap_seconds: float = 0.0,
+    section_titles: list[str] | None = None,
+    intro_title: str | None = None,
 ) -> tuple[Path, int | None]:
     """Synthesize ``chunks`` sequentially, appending each MP3 to ``part_path``.
 
@@ -441,15 +453,34 @@ async def _synthesize_chunks(
     of per-chunk mutagen measurements plus the gap — None when any chunk is
     unparseable (the caller then falls back to est_minutes). Raises on failure
     after any number of chunks; the caller removes the stale ``.part`` file.
+
+    Chapter markers: when ``section_titles`` is given, each chunk whose text
+    carries a section-title sentinel (``has_section_mark``) starts a chapter
+    whose start time is the cumulative duration of all prior chunks; sentinels
+    are stripped from chunk text before every Kokoro call so they never reach
+    the TTS server. When at least one section chapter exists, an intro chapter
+    titled ``intro_title`` is prepended at 0:00. Chapters are embedded into the
+    renamed file via :func:`write_id3_chapters` — skipped when the total
+    duration is unknown (unparseable audio) or there are no sections, and a
+    failure to embed is warning-only.
     """
     final_path = part_path.with_name(part_path.name.removesuffix(".part"))
-    total: int | None = 0
+    total: float | None = 0.0
+    chapters: list[tuple[int, str]] = []
+    section_titles = section_titles or []
+    title_index = 0
     with part_path.open("wb") as part_file:
         set_episode_progress(conn, episode_id, 0, len(chunks))
         for index, chunk in enumerate(chunks):
-            audio_bytes = await _synthesize_with_retry(kokoro_client, chunk, voice)
+            if has_section_mark(chunk) and title_index < len(section_titles):
+                start_ms = int(round(total * 1000)) if total is not None else 0
+                chapters.append((start_ms, section_titles[title_index]))
+                title_index += 1
+            audio_bytes = await _synthesize_with_retry(
+                kokoro_client, strip_section_mark(chunk), voice
+            )
             if total is not None:
-                chunk_duration = measure_duration(audio_bytes)
+                chunk_duration = measure_duration_seconds(audio_bytes)
                 if chunk_duration is None:
                     total = None
                 else:
@@ -468,7 +499,14 @@ async def _synthesize_chunks(
             if total is not None:
                 total += gap_duration * copies
     os.replace(part_path, final_path)
-    return final_path, total
+    duration = int(total) if total is not None else None
+    if duration is not None and chapters:
+        all_chapters: list[tuple[int, str]] = []
+        if intro_title:
+            all_chapters.append((0, intro_title))
+        all_chapters.extend(chapters)
+        write_id3_chapters(final_path, all_chapters, duration * 1000)
+    return final_path, duration
 
 
 async def generate_all(
@@ -540,7 +578,7 @@ async def generate_all(
                 set_episode_generating(conn, episode_id)
 
                 article = await wallabag_client.get_entry(wallabag_id)
-                tts_text = build_tts_input_from_article(
+                tts_text, section_titles = build_tts_input_from_article_with_sections(
                     article, min_chars=settings.MIN_TEXT_CHARS
                 )
                 chunks = split_tts_text(tts_text, settings.KOKORO_MAX_CHUNK_CHARS)
@@ -561,6 +599,8 @@ async def generate_all(
                         chunks,
                         voice,
                         gap_seconds=settings.EPISODE_GAP_SECONDS,
+                        section_titles=section_titles,
+                        intro_title=ep["title"],
                     )
                 except BaseException:
                     # A failed or cancelled episode must not leave a partial

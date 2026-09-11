@@ -8,9 +8,14 @@ from app.textclean import (
     apply_pronunciations,
     build_tts_input,
     build_tts_input_from_article,
+    build_tts_input_from_article_with_sections,
+    build_tts_input_with_sections,
     clean_body,
+    clean_body_with_sections,
     clean_title,
+    has_section_mark,
     split_tts_text,
+    strip_section_mark,
 )
 from app.wallabag import ArticleFull
 
@@ -552,6 +557,102 @@ def test_heading_and_bold_paragraph_end_to_end():
 
 
 # ---------------------------------------------------------------------------
+# 9c. section-title sentinel marks (chapters)
+# ---------------------------------------------------------------------------
+
+
+def test_clean_body_with_sections_marks_and_collects_titles():
+    html = (
+        "<h2>Getting Started</h2><p>First body.</p>"
+        "<p><strong>Installation</strong></p><p>Second body.</p>"
+    )
+    text, titles = clean_body_with_sections(html, min_chars=0)
+    assert titles == ["Getting Started", "Installation"]
+    assert "[pause:1s] Getting Started. [pause:1s]" in text
+    assert "[pause:1s] Installation. [pause:1s]" in text
+    assert has_section_mark(text)
+    # Each title's leading pause token is preceded by the sentinel.
+    assert "\ue000[pause:1s] Getting Started." in text
+    assert "\ue000[pause:1s] Installation." in text
+
+
+def test_clean_body_without_sections_has_no_marks():
+    text = clean_body("<h2>Intro</h2><p>Body.</p>", min_chars=0)
+    assert not has_section_mark(text)
+    assert "[pause:1s] Intro. [pause:1s]" in text
+
+
+def test_clean_body_with_sections_skips_short():
+    with pytest.raises(SkipArticle):
+        clean_body_with_sections("<p>short</p>", min_chars=200)
+
+
+def test_section_titles_in_document_order():
+    # A bold-paragraph title that precedes a heading must still be listed
+    # first: sentinel order in the flattened text defines chapter order.
+    html = "<p><strong>Bold First</strong></p><h3>Heading Second</h3><p>Body.</p>"
+    _, titles = clean_body_with_sections(html, min_chars=0)
+    assert titles == ["Bold First", "Heading Second"]
+
+
+def test_build_tts_input_with_sections_marked_and_titles():
+    text, titles = build_tts_input_with_sections(
+        "My Title", "<h2>One</h2><p>Body.</p>", min_chars=0
+    )
+    assert titles == ["One"]
+    assert text.startswith("[pause:0.5s] My Title [pause:1s]")
+    assert has_section_mark(text)
+    # The plain (chapter-less) assembly equals the marked text with sentinels
+    # stripped — the mark never changes the spoken input.
+    plain = build_tts_input("My Title", "<h2>One</h2><p>Body.</p>", min_chars=0)
+    assert plain == strip_section_mark(text)
+
+
+def test_build_tts_input_from_article_with_sections():
+    article = _article("<h2>One</h2><p>Body text.</p>", title="Art")
+    text, titles = build_tts_input_from_article_with_sections(article, min_chars=0)
+    assert titles == ["One"]
+    assert has_section_mark(text)
+    assert (
+        build_tts_input_from_article(article, min_chars=0)
+        == strip_section_mark(text)
+    )
+
+
+def test_strip_section_mark_removes_sentinels():
+    text = "\ue000[pause:1s] Title. [pause:1s] body"
+    stripped = strip_section_mark(text)
+    assert stripped == "[pause:1s] Title. [pause:1s] body"
+    assert not has_section_mark(stripped)
+    assert not has_section_mark("plain text")
+    assert not has_section_mark("")
+
+
+def test_orphan_section_mark_removed_after_boilerplate_cut():
+    # A trailing title whose text holds a boilerplate phrase is cut away by
+    # _remove_boilerplate, leaving only its sentinel + leading pause behind.
+    # The orphan mark must be dropped so no chapter is invented for text that
+    # is never spoken.
+    lead = "<p>" + "Real content here. " * 30 + "</p>"
+    html = lead + "<p><strong>Read More: Exciting Details</strong></p>"
+    text, titles = clean_body_with_sections(html, min_chars=0)
+    assert not has_section_mark(text)
+    # Recorded in the walk but its mark was cut -> no chapter pair for it.
+    assert titles == ["Read More: Exciting Details"]
+    assert "Read More" not in text
+
+
+def test_orphan_mark_not_stripped_from_live_trailing_title():
+    # A real title at the very end of the article keeps its sentinel: its
+    # token carries both the leading and closing pause.
+    html = "<p>Some body text.</p><h2>Final Word</h2>"
+    text, titles = clean_body_with_sections(html, min_chars=0)
+    assert titles == ["Final Word"]
+    assert has_section_mark(text)
+    assert "\ue000[pause:1s] Final Word. [pause:1s]" in text
+
+
+# ---------------------------------------------------------------------------
 # realistic Wallabag-style article
 # ---------------------------------------------------------------------------
 
@@ -657,3 +758,51 @@ def test_split_uses_settings_default(monkeypatch):
         assert " ".join(chunks) == text
     finally:
         get_settings.cache_clear()
+
+
+# ---------------------------------------------------------------------------
+# 11. section-title sentinel chunk alignment (chapter boundaries)
+# ---------------------------------------------------------------------------
+
+
+def test_split_starts_new_chunk_at_section_title():
+    body = " ".join(["word"] * 40) + "."
+    text = (
+        f"[pause:0.5s] Intro. [pause:1s] "
+        f"\ue000[pause:1s] Part One. [pause:1s] {body}"
+    )
+    chunks = split_tts_text(text, max_chars=40)
+    assert " ".join(chunks) == text
+    marked = [c for c in chunks if has_section_mark(c)]
+    assert len(marked) == 1
+    # The intro's trailing pause attaches forward, so the title sentence is
+    # "[pause:1s] \ue000[pause:1s] Part One." and it opens its own chunk.
+    assert marked[0].startswith("[pause:1s] \ue000[pause:1s] Part One.")
+    # The intro sentence never shares a chunk with the section title.
+    intro_chunks = [c for c in chunks if "[pause:0.5s]" in c]
+    assert len(intro_chunks) == 1
+    assert not has_section_mark(intro_chunks[0])
+
+
+def test_split_consecutive_titles_each_begin_their_own_chunk():
+    # Consecutive titles: each marked sentence follows a previous title's
+    # trailing pause token, so the mark sits mid-sentence — the rule must be
+    # "contains", not "starts with".
+    text = (
+        "[pause:0.5s] Intro. [pause:1s] "
+        "\ue000[pause:1s] One. [pause:1s] "
+        "\ue000[pause:1s] Two. [pause:1s] "
+        + " ".join(["word"] * 30) + "."
+    )
+    chunks = split_tts_text(text, max_chars=50)
+    assert " ".join(chunks) == text
+    marked = [c for c in chunks if has_section_mark(c)]
+    assert len(marked) == 2
+    assert marked[0].startswith("[pause:1s] \ue000[pause:1s] One.")
+    assert marked[1].startswith("[pause:1s] \ue000[pause:1s] Two.")
+
+
+def test_split_single_marked_text_is_one_chunk():
+    text = "[pause:0.5s] Title [pause:1s] \ue000[pause:1s] One. [pause:1s] Body."
+    chunks = split_tts_text(text, max_chars=200)
+    assert chunks == [text]

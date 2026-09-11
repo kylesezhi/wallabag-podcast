@@ -38,7 +38,7 @@ from app.pipeline import (
     generate_all,
     stats,
 )
-from app.textclean import build_tts_input, split_tts_text
+from app.textclean import build_tts_input, build_tts_input_with_sections, has_section_mark, split_tts_text, strip_section_mark
 from app.wallabag import WallabagClient, WallabagError
 
 _REQUIRED_ENV = {
@@ -256,7 +256,7 @@ async def test_happy_path(env, monkeypatch):
 
     wallabag = _make_wallabag(_wallabag_ok_handler())
     kokoro = _make_kokoro(lambda request: httpx.Response(200, content=b"FAKE_MP3"))
-    monkeypatch.setattr("app.pipeline.measure_duration", lambda audio_path: 60)
+    monkeypatch.setattr("app.pipeline.measure_duration_seconds", lambda audio_path: 60)
 
     summary = await generate_all(wallabag, kokoro, settings=get_settings())
 
@@ -294,7 +294,7 @@ async def test_skip_article_is_isolated(env, monkeypatch):
 
     wallabag = _make_wallabag(wallabag_handler)
     kokoro = _make_kokoro(lambda request: httpx.Response(200, content=b"FAKE_MP3"))
-    monkeypatch.setattr("app.pipeline.measure_duration", lambda audio_path: 60)
+    monkeypatch.setattr("app.pipeline.measure_duration_seconds", lambda audio_path: 60)
 
     summary = await generate_all(wallabag, kokoro, settings=get_settings())
 
@@ -324,7 +324,7 @@ async def test_kokoro_failure_is_isolated(env, monkeypatch):
         httpx.Response(200, content=b"FAKE_MP3"),
     ]
     kokoro = _make_kokoro(lambda request: responses.pop(0))
-    monkeypatch.setattr("app.pipeline.measure_duration", lambda audio_path: 60)
+    monkeypatch.setattr("app.pipeline.measure_duration_seconds", lambda audio_path: 60)
 
     summary = await generate_all(wallabag, kokoro, settings=get_settings())
 
@@ -353,7 +353,7 @@ async def test_wallabag_failure_is_isolated(env, monkeypatch):
 
     wallabag = _make_wallabag(wallabag_handler)
     kokoro = _make_kokoro(lambda request: httpx.Response(200, content=b"FAKE_MP3"))
-    monkeypatch.setattr("app.pipeline.measure_duration", lambda audio_path: 60)
+    monkeypatch.setattr("app.pipeline.measure_duration_seconds", lambda audio_path: 60)
 
     summary = await generate_all(wallabag, kokoro, settings=get_settings())
 
@@ -385,7 +385,7 @@ async def test_voice_comes_from_db_settings(env, monkeypatch):
 
     wallabag = _make_wallabag(_wallabag_ok_handler())
     kokoro = _make_kokoro(kokoro_handler)
-    monkeypatch.setattr("app.pipeline.measure_duration", lambda audio_path: 60)
+    monkeypatch.setattr("app.pipeline.measure_duration_seconds", lambda audio_path: 60)
 
     summary = await generate_all(wallabag, kokoro, settings=get_settings())
 
@@ -407,7 +407,7 @@ async def test_voice_falls_back_to_default_when_db_row_missing(env, monkeypatch)
 
     wallabag = _make_wallabag(_wallabag_ok_handler())
     kokoro = _make_kokoro(kokoro_handler)
-    monkeypatch.setattr("app.pipeline.measure_duration", lambda audio_path: 60)
+    monkeypatch.setattr("app.pipeline.measure_duration_seconds", lambda audio_path: 60)
 
     summary = await generate_all(wallabag, kokoro, settings=get_settings())
 
@@ -458,7 +458,7 @@ async def test_generate_cancelled_mid_flight(env, monkeypatch):
         return httpx.Response(200, content=b"FAKE_MP3")
 
     kokoro = _make_kokoro(kokoro_handler)
-    monkeypatch.setattr("app.pipeline.measure_duration", lambda audio_path: 60)
+    monkeypatch.setattr("app.pipeline.measure_duration_seconds", lambda audio_path: 60)
 
     summary = await generate_all(wallabag, kokoro, settings=get_settings())
 
@@ -487,7 +487,7 @@ async def test_generate_cancelled_before_first_await(env, monkeypatch):
 
     wallabag = _make_wallabag(_wallabag_ok_handler())
     kokoro = _make_kokoro(lambda request: httpx.Response(200, content=b"FAKE_MP3"))
-    monkeypatch.setattr("app.pipeline.measure_duration", lambda audio_path: 60)
+    monkeypatch.setattr("app.pipeline.measure_duration_seconds", lambda audio_path: 60)
 
     # Gate the first wallabag fetch so the task parks at an await inside the
     # loop, then deliver the cancel externally via task.cancel() — proving a
@@ -568,7 +568,7 @@ async def test_generate_all_synthesizes_in_chunks(env, monkeypatch):
 
     wallabag = _make_wallabag(_wallabag_entry_handler(content))
     kokoro = _make_kokoro(kokoro_handler)
-    monkeypatch.setattr("app.pipeline.measure_duration", lambda audio: 7)
+    monkeypatch.setattr("app.pipeline.measure_duration_seconds", lambda audio: 7)
 
     summary = await generate_all(wallabag, kokoro, settings=settings)
 
@@ -608,6 +608,144 @@ def _wallabag_entry_handler(content: str):
     return handler
 
 
+# ---------------------------------------------------------------------------
+# ID3 chapter markers
+# ---------------------------------------------------------------------------
+
+
+def _sectioned_content() -> str:
+    """Article HTML with two section titles, well over MIN_TEXT_CHARS."""
+    return (
+        "<h2>Section Alpha</h2><p>" + " ".join(["word"] * 30) + "</p>"
+        "<h2>Section Beta</h2><p>" + " ".join(["word"] * 30) + "</p>"
+    )
+
+
+async def test_generate_embeds_chapters_with_exact_times(env, monkeypatch):
+    """Section titles become ID3 chapters; sentinels never reach Kokoro.
+
+    The intro chapter uses the staged row title (not the article title) and
+    each section chapter starts at the cumulative duration of the preceding
+    chunks (float-precision measurement).
+    """
+    content = _sectioned_content()
+    with sqlite3.connect(get_db_path()) as conn:
+        _insert_staged(conn, [(1, "Row Episode Title")])
+
+    settings = _chunk_settings(monkeypatch, 80)
+
+    # Rebuild the exact TTS text the pipeline will produce (article title
+    # "Article 1" from _entry_payload; the row title is the intro chapter).
+    expected_tts, titles = build_tts_input_with_sections(
+        "Article 1", content, min_chars=settings.MIN_TEXT_CHARS
+    )
+    expected_chunks = split_tts_text(expected_tts, max_chars=80)
+    assert len(expected_chunks) > 2  # the test really exercises chunking
+    assert titles == ["Section Alpha", "Section Beta"]
+
+    # Distinct per-chunk durations (1.0s, 2.0s, ...) so start times are exact.
+    durs = [float(i + 1) for i in range(len(expected_chunks))]
+    duration_iter = iter(durs)
+
+    expected_chapters = [(0, "Row Episode Title")]
+    cumulative = 0.0
+    title_index = 0
+    for index, chunk in enumerate(expected_chunks):
+        if has_section_mark(chunk):
+            expected_chapters.append(
+                (int(round(cumulative * 1000)), titles[title_index])
+            )
+            title_index += 1
+        cumulative += durs[index]
+
+    calls: list = []
+
+    def fake_writer(path, chapters, total_ms):
+        calls.append((path, list(chapters), total_ms))
+        return True
+
+    monkeypatch.setattr("app.pipeline.write_id3_chapters", fake_writer)
+    monkeypatch.setattr(
+        "app.pipeline.measure_duration_seconds", lambda audio: next(duration_iter)
+    )
+
+    speech_calls: list[httpx.Request] = []
+
+    def kokoro_handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/v1/audio/speech":
+            speech_calls.append(request)
+            return httpx.Response(200, content=b"FAKE_MP3")
+        return httpx.Response(404)
+
+    wallabag = _make_wallabag(_wallabag_entry_handler(content))
+    kokoro = _make_kokoro(kokoro_handler)
+
+    summary = await generate_all(wallabag, kokoro, settings=settings)
+
+    assert summary["done"] == 1
+
+    # The sentinel is stripped before every synthesis request.
+    inputs = [json.loads(call.content)["input"] for call in speech_calls]
+    assert inputs == [strip_section_mark(c) for c in expected_chunks]
+    assert all(not has_section_mark(text) for text in inputs)
+
+    # Exactly one embed call, against the final mp3, with expected chapters.
+    assert len(calls) == 1
+    assert calls[0][0] == env / "audio" / "1.mp3"
+    assert calls[0][1] == expected_chapters
+    assert calls[0][2] == int(sum(durs)) * 1000
+
+
+async def test_generate_no_sections_skips_embedding(env, monkeypatch):
+    content = "<p>" + " ".join(["word"] * 100) + "</p>"
+    with sqlite3.connect(get_db_path()) as conn:
+        _insert_staged(conn, [(1, "Article One")])
+
+    calls: list = []
+    monkeypatch.setattr(
+        "app.pipeline.write_id3_chapters",
+        lambda *args: calls.append(args) or True,
+    )
+    monkeypatch.setattr("app.pipeline.measure_duration_seconds", lambda audio: 60)
+
+    wallabag = _make_wallabag(_wallabag_entry_handler(content))
+    kokoro = _make_kokoro(lambda request: httpx.Response(200, content=b"FAKE_MP3"))
+
+    summary = await generate_all(wallabag, kokoro, settings=get_settings())
+
+    assert summary["done"] == 1
+    assert calls == []
+
+
+async def test_generate_unparseable_duration_skips_embedding(env, monkeypatch):
+    """When no chunk duration is measurable the episode still completes (with
+    the est_minutes fallback) but gets no chapters — timings are unknown."""
+    content = "<h2>Section</h2><p>" + " ".join(["word"] * 40) + "</p>"
+    with sqlite3.connect(get_db_path()) as conn:
+        _insert_staged(conn, [(1, "Article One")])
+
+    calls: list = []
+    monkeypatch.setattr(
+        "app.pipeline.write_id3_chapters",
+        lambda *args: calls.append(args) or True,
+    )
+    monkeypatch.setattr("app.pipeline.measure_duration_seconds", lambda audio: None)
+
+    wallabag = _make_wallabag(_wallabag_entry_handler(content))
+    kokoro = _make_kokoro(lambda request: httpx.Response(200, content=b"FAKE_MP3"))
+
+    summary = await generate_all(wallabag, kokoro, settings=get_settings())
+
+    assert summary["done"] == 1
+    assert calls == []
+    with sqlite3.connect(get_db_path()) as conn:
+        row = conn.execute(
+            "SELECT status, duration_sec FROM episodes WHERE id=1"
+        ).fetchone()
+    assert row[0] == "done"
+    assert row[1] == 5 * 60  # est_minutes fallback
+
+
 async def test_generate_all_retries_failed_chunk_once(env, monkeypatch):
     with sqlite3.connect(get_db_path()) as conn:
         _insert_staged(conn, [(1, "Article One")])
@@ -618,7 +756,7 @@ async def test_generate_all_retries_failed_chunk_once(env, monkeypatch):
     ]
     kokoro = _make_kokoro(lambda request: responses.pop(0))
     wallabag = _make_wallabag(_wallabag_ok_handler())
-    monkeypatch.setattr("app.pipeline.measure_duration", lambda audio: 60)
+    monkeypatch.setattr("app.pipeline.measure_duration_seconds", lambda audio: 60)
 
     summary = await generate_all(wallabag, kokoro, settings=get_settings())
 
@@ -667,7 +805,7 @@ async def test_generate_cancelled_mid_chunks_cleans_up_part(env, monkeypatch):
 
     wallabag = _make_wallabag(_wallabag_entry_handler(content))
     kokoro = _make_kokoro(kokoro_handler)
-    monkeypatch.setattr("app.pipeline.measure_duration", lambda audio: 60)
+    monkeypatch.setattr("app.pipeline.measure_duration_seconds", lambda audio: 60)
 
     summary = await generate_all(wallabag, kokoro, settings=settings)
 
@@ -712,7 +850,7 @@ async def test_generate_appends_trailing_gap(
 
     wallabag = _make_wallabag(_wallabag_ok_handler())
     kokoro = _make_kokoro(lambda request: httpx.Response(200, content=b"FAKE_MP3"))
-    monkeypatch.setattr("app.pipeline.measure_duration", lambda audio_path: 60)
+    monkeypatch.setattr("app.pipeline.measure_duration_seconds", lambda audio_path: 60)
 
     summary = await generate_all(wallabag, kokoro, settings=get_settings())
 
@@ -1294,7 +1432,7 @@ async def test_generate_all_retries_failed_after_reset(env, monkeypatch):
 
     wallabag = _make_wallabag(_wallabag_ok_handler())
     kokoro = _make_kokoro(lambda request: httpx.Response(200, content=b"FAKE_MP3"))
-    monkeypatch.setattr("app.pipeline.measure_duration", lambda audio_path: 60)
+    monkeypatch.setattr("app.pipeline.measure_duration_seconds", lambda audio_path: 60)
 
     summary = await generate_all(wallabag, kokoro, settings=get_settings())
 
@@ -1346,7 +1484,7 @@ async def test_generate_all_skips_episode_removed_midrun(env, monkeypatch):
 
     wallabag = _make_wallabag(wallabag_handler)
     kokoro = _make_kokoro(kokoro_handler)
-    monkeypatch.setattr("app.pipeline.measure_duration", lambda audio_path: 60)
+    monkeypatch.setattr("app.pipeline.measure_duration_seconds", lambda audio_path: 60)
 
     summary = await generate_all(wallabag, kokoro, settings=get_settings())
 
@@ -1396,7 +1534,7 @@ async def test_generate_all_applies_pronunciations(env, monkeypatch):
 
     wallabag = _make_wallabag(wallabag_handler)
     kokoro = _make_kokoro(kokoro_handler)
-    monkeypatch.setattr("app.pipeline.measure_duration", lambda audio_path: 60)
+    monkeypatch.setattr("app.pipeline.measure_duration_seconds", lambda audio_path: 60)
 
     try:
         summary = await generate_all(wallabag, kokoro, settings=get_settings())
@@ -1480,7 +1618,7 @@ async def test_unexpected_failure_stores_type_and_writes_traceback(
 
     # An unexpected (non-Kokoro/Wallabag) failure mid-pipeline: the short
     # reason goes in episodes.error; the full traceback goes to the log file.
-    monkeypatch.setattr("app.pipeline.build_tts_input_from_article", boom)
+    monkeypatch.setattr("app.pipeline.build_tts_input_from_article_with_sections", boom)
 
     wallabag = _make_wallabag(_wallabag_ok_handler())
     kokoro = _make_kokoro(lambda request: httpx.Response(200, content=b"FAKE_MP3"))
@@ -1509,7 +1647,7 @@ async def test_lifecycle_logs_on_success(env, monkeypatch, logging_restore):
 
     wallabag = _make_wallabag(_wallabag_ok_handler())
     kokoro = _make_kokoro(lambda request: httpx.Response(200, content=b"FAKE_MP3"))
-    monkeypatch.setattr("app.pipeline.measure_duration", lambda audio_path: 60)
+    monkeypatch.setattr("app.pipeline.measure_duration_seconds", lambda audio_path: 60)
 
     summary = await generate_all(wallabag, kokoro, settings=get_settings())
     assert summary == {"total": 1, "done": 1, "failed": 0, "skipped": 0}
@@ -1586,7 +1724,7 @@ async def test_generate_all_scoped_to_podcast(env, monkeypatch):
 
     wallabag = _make_wallabag(_wallabag_ok_handler())
     kokoro = _make_kokoro(lambda request: httpx.Response(200, content=b"FAKE_MP3"))
-    monkeypatch.setattr("app.pipeline.measure_duration", lambda audio_path: 60)
+    monkeypatch.setattr("app.pipeline.measure_duration_seconds", lambda audio_path: 60)
 
     summary = await generate_all(
         wallabag, kokoro, settings=get_settings(), podcast_id=podcast_a["id"]

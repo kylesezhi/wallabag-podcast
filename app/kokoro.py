@@ -175,6 +175,24 @@ class KokoroClient:
         return resp.content
 
 
+def measure_duration_seconds(audio: Path | bytes) -> float | None:
+    """Return the audio duration in (fractional) seconds via mutagen.
+
+    Accepts raw MP3 bytes (a single synthesis chunk) or a path to an MP3 file.
+    Returns None when the audio can't be parsed (empty, corrupt, or not
+    actually MP3). Never raises, so generation never crashes on bad audio.
+    The float precision is used to accumulate exact chapter start times.
+    """
+    try:
+        if isinstance(audio, bytes):
+            length = mutagen.mp3.MP3(io.BytesIO(audio)).info.length
+        else:
+            length = mutagen.mp3.MP3(audio).info.length
+        return float(length)
+    except Exception:
+        return None
+
+
 def measure_duration(audio: Path | bytes) -> int | None:
     """Return the audio duration in whole seconds via mutagen.
 
@@ -182,11 +200,5 @@ def measure_duration(audio: Path | bytes) -> int | None:
     Returns None when the audio can't be parsed (empty, corrupt, or not
     actually MP3). Never raises, so generation never crashes on bad audio.
     """
-    try:
-        if isinstance(audio, bytes):
-            length = mutagen.mp3.MP3(io.BytesIO(audio)).info.length
-        else:
-            length = mutagen.mp3.MP3(audio).info.length
-        return int(length)
-    except Exception:
-        return None
+    seconds = measure_duration_seconds(audio)
+    return int(seconds) if seconds is not None else None

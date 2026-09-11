@@ -7,7 +7,13 @@ import httpx
 import pytest
 
 from app.config import Settings
-from app.kokoro import KokoroClient, KokoroConnectionError, KokoroError, measure_duration
+from app.kokoro import (
+    KokoroClient,
+    KokoroConnectionError,
+    KokoroError,
+    measure_duration,
+    measure_duration_seconds,
+)
 
 KOKORO_URL = "http://kokoro.example.test"
 
@@ -151,6 +157,27 @@ def test_measure_duration_returns_seconds(monkeypatch):
 
     monkeypatch.setattr("mutagen.mp3.MP3", _FakeMP3)
     assert measure_duration(Path("/tmp/fake.mp3")) == 42
+
+
+def test_measure_duration_seconds_returns_float(monkeypatch):
+    class _FakeInfo:
+        length = 42.7
+
+    class _FakeMP3:
+        def __init__(self, path):
+            self.path = path
+            self.info = _FakeInfo()
+
+    monkeypatch.setattr("mutagen.mp3.MP3", _FakeMP3)
+    assert measure_duration_seconds(Path("/tmp/fake.mp3")) == 42.7
+
+
+def test_measure_duration_seconds_returns_none_on_parse_error(monkeypatch):
+    def _boom(path):
+        raise ValueError("not an mp3")
+
+    monkeypatch.setattr("mutagen.mp3.MP3", _boom)
+    assert measure_duration_seconds(Path("/tmp/fake.mp3")) is None
 
 
 def test_measure_duration_returns_none_on_parse_error(monkeypatch):

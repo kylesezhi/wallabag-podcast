@@ -8,7 +8,10 @@ Kokoro TTS. No LLM, no network. The pipeline:
 3. Replace section titles — h1-h6 headings and paragraphs whose entire text
    is bold (``<p><strong>Title</strong></p>``) — with
    ``[pause:1s] Title. [pause:1s]`` tokens that Kokoro-FastAPI interprets
-   natively.
+   natively. The ``*_with_sections`` variants additionally prefix each token
+   with a private-use sentinel (``_SECTION_MARK``) and return the title
+   strings in document order, so the pipeline can align every title to a
+   synthesis chunk and stamp ID3 chapter markers.
 4. Extract text with a space separator, unescape residual entities, collapse
    whitespace, drop bare URLs/emails and trailing boilerplate.
 5. Ensure terminal punctuation.
@@ -17,7 +20,8 @@ Kokoro TTS. No LLM, no network. The pipeline:
 
 ``split_tts_text`` additionally splits a finished TTS input into sentence-boundary
 chunks (max ``Settings.KOKORO_MAX_CHUNK_CHARS`` chars) so the generation pipeline
-can synthesize long articles one bounded request at a time.
+can synthesize long articles one bounded request at a time; sentences carrying a
+section-title sentinel always begin a new chunk so chapter starts are exact.
 
 Articles whose cleaned body is shorter than ``MIN_TEXT_CHARS`` raise
 :class:`SkipArticle` so the generation pipeline can skip them.
@@ -74,6 +78,17 @@ _SPACE_BEFORE_PUNCT_RE = re.compile(r"\s+([.!?,;:])")
 _HEADING_PAUSE_BEFORE = "[pause:1s]"
 _HEADING_PAUSE_AFTER = "[pause:1s]"
 _HEADINGS = ("h1", "h2", "h3", "h4", "h5", "h6")
+
+# Private-use sentinel prepended to each section-title token when the caller
+# asks for chapter positions (``clean_body_with_sections`` /
+# ``build_tts_input_with_sections``). It survives every cleaning transform
+# untouched and marks exactly where a title starts in the flattened text, then
+# is stripped again before synthesis — it must never reach Kokoro. A regex over
+# the flattened text cannot locate titles reliably (the intro's trailing
+# ``[pause:1s]`` would false-match body text) and the raw heading string can
+# differ from the cleaned text (entities, URLs, pronunciation rewrites), so the
+# mark is the position source of truth.
+_SECTION_MARK = "\ue000"
 
 # Wallabag reader output also marks section titles as paragraphs whose entire
 # text is bold (<p><strong>Title</strong></p>, <b> variant included). Those
@@ -150,15 +165,23 @@ def _all_text_is_bold(node: Tag) -> bool:
     return True
 
 
-def _section_title_token(text: str) -> str:
-    """Pause-wrapped, period-terminated TTS fragment for one section title."""
+def _section_title_token(text: str, marked: bool = False) -> str:
+    """Pause-wrapped, period-terminated TTS fragment for one section title.
+
+    When ``marked`` is true a private-use sentinel precedes the leading pause
+    token so :func:`split_tts_text` can align the title to a chunk boundary
+    and the pipeline can compute chapter start times.
+    """
+    mark = _SECTION_MARK if marked else ""
     return (
-        f"{_HEADING_PAUSE_BEFORE} "
+        f"{mark}{_HEADING_PAUSE_BEFORE} "
         f"{_ensure_terminal_punctuation(text)} {_HEADING_PAUSE_AFTER}"
     )
 
 
-def _wrap_section_titles_with_pauses(soup: BeautifulSoup) -> None:
+def _wrap_section_titles_with_pauses(
+    soup: BeautifulSoup, titles: list[str] | None = None
+) -> None:
     """Replace each section title with a pause-wrapped, period-terminated string.
 
     Section titles are h1-h6 headings plus paragraphs whose entire text is
@@ -166,28 +189,41 @@ def _wrap_section_titles_with_pauses(soup: BeautifulSoup) -> None:
     skipped; nested inline markup inside a title (<h2><em>Title</em></h2>)
     is flattened by get_text. Consecutive titles produce adjacent pause
     pairs — Kokoro handles repeated tokens.
+
+    When ``titles`` is given, each title's raw text is appended to it in
+    document order and its token is prefixed with ``_SECTION_MARK`` so the
+    caller can map titles to synthesis chunks (chapter markers).
     """
-    for node in soup.find_all(_HEADINGS):
-        text = node.get_text(" ", strip=True)
+    marked = titles is not None
+    # One document-order pass over every heading and paragraph so collected
+    # titles match the order their sentinels appear in the flattened text
+    # (a bold-paragraph title may precede a heading).
+    for node in soup.find_all((*_HEADINGS, "p")):
+        if node.name in _HEADINGS:
+            text = node.get_text(" ", strip=True)
+        else:
+            if not _all_text_is_bold(node):
+                continue
+            text = node.get_text(" ", strip=True)
         if not text:
             continue
-        node.replace_with(NavigableString(_section_title_token(text)))
-    for node in soup.find_all("p"):
-        if not _all_text_is_bold(node):
-            continue
-        text = node.get_text(" ", strip=True)
-        if not text:
-            continue
-        node.replace_with(NavigableString(_section_title_token(text)))
+        node.replace_with(NavigableString(_section_title_token(text, marked)))
+        if titles is not None:
+            titles.append(text)
 
 
-def _extract_text(html: str) -> str:
-    """Parse HTML, drop non-content elements, and return plain text."""
+def _extract_text(html: str, titles: list[str] | None = None) -> str:
+    """Parse HTML, drop non-content elements, and return plain text.
+
+    When ``titles`` is given it is filled with the section titles in document
+    order and their tokens carry ``_SECTION_MARK`` (see
+    :func:`_wrap_section_titles_with_pauses`).
+    """
     soup = BeautifulSoup(html, "lxml")
     for tag in _REMOVE_TAGS:
         for node in soup.find_all(tag):
             node.decompose()
-    _wrap_section_titles_with_pauses(soup)
+    _wrap_section_titles_with_pauses(soup, titles)
     return soup.get_text(separator=" ")
 
 
@@ -233,6 +269,39 @@ def _remove_boilerplate(text: str) -> str:
     if cut is not None:
         text = text[:cut]
     return text
+
+
+def _strip_orphan_section_mark(text: str) -> str:
+    """Drop a trailing section-title mark orphaned by boilerplate truncation.
+
+    ``_remove_boilerplate`` cuts a suffix, so a title near the end of the text
+    can be partly or wholly removed while its sentinel survives. A live title
+    token carries its own leading AND closing pause; a fragment after the last
+    mark with fewer than two ``[pause:1s]`` tokens is an orphan (the title text
+    was cut) and is dropped. Live tokens always keep their closing pause, so
+    they are never mistaken for orphans regardless of what body text follows.
+    """
+    index = text.rfind(_SECTION_MARK)
+    if index == -1:
+        return text
+    tail = text[index:]
+    if tail.count(_HEADING_PAUSE_AFTER) >= 2:
+        return text
+    return text[:index].rstrip()
+
+
+def has_section_mark(text: str) -> bool:
+    """True when ``text`` contains a section-title sentinel."""
+    return _SECTION_MARK in text
+
+
+def strip_section_mark(text: str) -> str:
+    """Remove every section-title sentinel so the text is TTS-safe.
+
+    The sentinel is only a chapter-position marker; it must never reach the
+    Kokoro server.
+    """
+    return text.replace(_SECTION_MARK, "")
 
 
 def _ensure_terminal_punctuation(text: str) -> str:
@@ -292,19 +361,17 @@ def clean_title(title: str) -> str:
     return _normalize_ws(_html.unescape(text))
 
 
-def clean_body(html: str, min_chars: int | None = None) -> str:
-    """Parse and clean HTML content into spoken-word prose.
-
-    Raises :class:`SkipArticle` if the cleaned text is shorter than
-    ``min_chars`` (default: ``Settings.MIN_TEXT_CHARS``).
-    """
+def _clean_body(
+    html: str, min_chars: int | None, titles: list[str] | None
+) -> str:
     threshold = get_settings().MIN_TEXT_CHARS if min_chars is None else min_chars
 
-    text = _extract_text(html)
+    text = _extract_text(html, titles)
     text = _html.unescape(text)
     text = _remove_urls(text)
     text = _remove_emails(text)
     text = _remove_boilerplate(text)
+    text = _strip_orphan_section_mark(text)
     text = _normalize_ws(text)
     text = _ensure_terminal_punctuation(text)
 
@@ -314,6 +381,30 @@ def clean_body(html: str, min_chars: int | None = None) -> str:
             f"(minimum {threshold})"
         )
     return text
+
+
+def clean_body(html: str, min_chars: int | None = None) -> str:
+    """Parse and clean HTML content into spoken-word prose.
+
+    Raises :class:`SkipArticle` if the cleaned text is shorter than
+    ``min_chars`` (default: ``Settings.MIN_TEXT_CHARS``).
+    """
+    return _clean_body(html, min_chars, None)
+
+
+def clean_body_with_sections(
+    html: str, min_chars: int | None = None
+) -> tuple[str, list[str]]:
+    """Like :func:`clean_body` but also return the section titles.
+
+    Returns ``(text, titles)`` where ``titles`` holds each section title's raw
+    text in document order and ``text`` carries ``_SECTION_MARK`` sentinels at
+    each title position (strip them before synthesis; see
+    :func:`strip_section_mark`).
+    """
+    titles: list[str] = []
+    text = _clean_body(html, min_chars, titles)
+    return text, titles
 
 
 # Sentence boundary: whitespace following terminal punctuation. Splitting here
@@ -344,10 +435,13 @@ def split_tts_text(text: str, max_chars: int | None = None) -> list[str]:
     Chunks are assembled from whole sentences (split after terminal
     punctuation) so every synthesized chunk ends at a natural spoken boundary.
     A single sentence longer than ``max_chars`` is hard-split at word
-    boundaries. ``[pause:...]`` tokens are never cut in half. Joining the
-    returned chunks with single spaces reconstructs the input text exactly.
-    When ``max_chars`` is None the default ``Settings.KOKORO_MAX_CHUNK_CHARS``
-    is used.
+    boundaries. ``[pause:...]`` tokens are never cut in half. A sentence
+    containing a section-title sentinel (``_SECTION_MARK``) always begins a
+    new chunk, so every section title aligns with a chunk boundary — the
+    pipeline uses the cumulative duration of the preceding chunks as the
+    chapter's start time. Joining the returned chunks with single spaces
+    reconstructs the input text exactly. When ``max_chars`` is None the
+    default ``Settings.KOKORO_MAX_CHUNK_CHARS`` is used.
     """
     limit = get_settings().KOKORO_MAX_CHUNK_CHARS if max_chars is None else max_chars
 
@@ -362,6 +456,12 @@ def split_tts_text(text: str, max_chars: int | None = None) -> list[str]:
     chunks: list[str] = []
     current = ""
     for sentence in sentences:
+        # A section title (sentinel sentence) starts a new chunk. The mark may
+        # sit mid-sentence — after a previous title's trailing pause token in
+        # the consecutive-titles case — so test for containment, not a prefix.
+        if _SECTION_MARK in sentence and current:
+            chunks.append(current)
+            current = ""
         if len(sentence) > limit:
             # Flush what we have, then hard-split the oversized sentence.
             if current:
@@ -380,6 +480,29 @@ def split_tts_text(text: str, max_chars: int | None = None) -> list[str]:
     return chunks
 
 
+def build_tts_input_with_sections(
+    title: str, html: str, min_chars: int | None = None
+) -> tuple[str, list[str]]:
+    """Assemble the TTS input string and its section titles.
+
+    Same assembly as :func:`build_tts_input`, but the returned text carries
+    ``_SECTION_MARK`` sentinels at each section title (strip before synthesis;
+    see :func:`strip_section_mark`) and the second element is the ordered list
+    of section titles, for chapter markers. When ``min_chars`` is ``None`` the
+    body is length-guarded with the default ``Settings.MIN_TEXT_CHARS``
+    (raises :class:`SkipArticle`); pass an explicit value to override. Both
+    title and body pass through :func:`apply_pronunciations`
+    (``Settings.PRONUNCIATIONS``) before assembly, so the ``[pause:...]``
+    tokens themselves are never rewritten.
+    """
+    clean = clean_title(title)
+    body, titles = clean_body_with_sections(html, min_chars=min_chars)
+    pronunciations = get_settings().PRONUNCIATIONS
+    clean = apply_pronunciations(clean, pronunciations)
+    body = apply_pronunciations(body, pronunciations)
+    return f"[pause:0.5s] {clean} [pause:1s] {body}", titles
+
+
 def build_tts_input(title: str, html: str, min_chars: int | None = None) -> str:
     """Assemble the exact TTS input string for an article.
 
@@ -390,15 +513,17 @@ def build_tts_input(title: str, html: str, min_chars: int | None = None) -> str:
     :func:`apply_pronunciations` (``Settings.PRONUNCIATIONS``) before
     assembly, so the ``[pause:...]`` tokens themselves are never rewritten.
     """
-    clean = clean_title(title)
-    if min_chars is None:
-        body = clean_body(html)
-    else:
-        body = clean_body(html, min_chars=min_chars)
-    pronunciations = get_settings().PRONUNCIATIONS
-    clean = apply_pronunciations(clean, pronunciations)
-    body = apply_pronunciations(body, pronunciations)
-    return f"[pause:0.5s] {clean} [pause:1s] {body}"
+    text, _ = build_tts_input_with_sections(title, html, min_chars=min_chars)
+    return strip_section_mark(text)
+
+
+def build_tts_input_from_article_with_sections(
+    article: ArticleFull, min_chars: int | None = None
+) -> tuple[str, list[str]]:
+    """Assemble the TTS input string and section titles from an article."""
+    return build_tts_input_with_sections(
+        article.title, article.content, min_chars=min_chars
+    )
 
 
 def build_tts_input_from_article(
