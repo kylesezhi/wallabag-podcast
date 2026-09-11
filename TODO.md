@@ -1,3 +1,5 @@
+- start with 2-minute summary
+- add chapters to xml based on article headings
 - generate multiple podcasts
 - default voice setting for all episodes, but configurable on per ep basis before generation
 - add by wallabag entry number
