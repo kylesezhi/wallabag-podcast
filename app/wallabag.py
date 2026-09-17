@@ -53,6 +53,8 @@ class ArticleMeta:
     tags: list[str]  # normalized to lowercase strings
     is_archived: bool
     is_starred: bool
+    published_at: str | None = None  # ISO string; null when Wallabag has no publish date
+    created_at: str | None = None  # ISO string; when the article was saved to Wallabag
 
 
 @dataclass(frozen=True, slots=True)
@@ -69,6 +71,16 @@ class ArticleFull:
     is_archived: bool
     is_starred: bool
     content: str  # raw HTML
+    published_at: str | None = None  # ISO string; null when Wallabag has no publish date
+    created_at: str | None = None  # ISO string; when the article was saved to Wallabag
+
+
+def _nullable_str(raw: Any) -> str | None:
+    """Return a trimmed string value, or ``None`` for blank/absent input."""
+    if raw is None:
+        return None
+    value = str(raw).strip()
+    return value or None
 
 
 def _normalize_tags(raw: Any) -> list[str]:
@@ -341,6 +353,8 @@ class WallabagClient:
             tags=_normalize_tags(item.get("tags")),
             is_archived=bool(int(item.get("is_archived") or 0)),
             is_starred=bool(int(item.get("is_starred") or 0)),
+            published_at=_nullable_str(item.get("published_at")),
+            created_at=_nullable_str(item.get("created_at")),
         )
 
     @classmethod
@@ -357,4 +371,6 @@ class WallabagClient:
             is_archived=meta.is_archived,
             is_starred=meta.is_starred,
             content=str(item.get("content") or ""),
+            published_at=meta.published_at,
+            created_at=meta.created_at,
         )

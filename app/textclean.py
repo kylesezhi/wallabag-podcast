@@ -31,6 +31,7 @@ from __future__ import annotations
 
 import html as _html
 import re
+from datetime import date as _date, datetime as _datetime
 
 from bs4 import BeautifulSoup, NavigableString, Tag
 
@@ -361,6 +362,44 @@ def clean_title(title: str) -> str:
     return _normalize_ws(_html.unescape(text))
 
 
+def _parse_wallabag_date(iso: str | None) -> _date | None:
+    """Parse a Wallabag date string (ISO 8601 or date-only) into a date.
+
+    Returns ``None`` for blank, unparseable, or implausible (year ``<= 1970``)
+    values — Wallabag/Graby sometimes records junk like the epoch for a
+    missing ``published_at``.
+    """
+    if not iso:
+        return None
+    try:
+        value = iso.strip()
+        if "T" in value:
+            parsed = _datetime.fromisoformat(value).date()
+        else:
+            parsed = _date.fromisoformat(value)
+    except ValueError:
+        return None
+    if parsed.year <= 1970:
+        return None
+    return parsed
+
+
+def _spoken_date(published_at: str | None, created_at: str | None) -> str | None:
+    """Format the article's date for speech, e.g. ``July 4, 2024``.
+
+    Prefers ``published_at`` (the article's original publish date) and falls
+    back to ``created_at`` (when the article was saved to Wallabag) when the
+    publish date is blank, unparseable, or implausible. Returns ``None`` when
+    neither yields a usable date — callers then omit the date from the intro.
+    The date is kept in Wallabag's own offset (no UTC conversion) so it
+    matches what the Wallabag UI shows.
+    """
+    parsed = _parse_wallabag_date(published_at) or _parse_wallabag_date(created_at)
+    if parsed is None:
+        return None
+    return f"{parsed:%B} {parsed.day}, {parsed.year}"
+
+
 def _clean_body(
     html: str, min_chars: int | None, titles: list[str] | None
 ) -> str:
@@ -481,7 +520,10 @@ def split_tts_text(text: str, max_chars: int | None = None) -> list[str]:
 
 
 def build_tts_input_with_sections(
-    title: str, html: str, min_chars: int | None = None
+    title: str,
+    html: str,
+    min_chars: int | None = None,
+    spoken_date: str | None = None,
 ) -> tuple[str, list[str]]:
     """Assemble the TTS input string and its section titles.
 
@@ -493,27 +535,44 @@ def build_tts_input_with_sections(
     (raises :class:`SkipArticle`); pass an explicit value to override. Both
     title and body pass through :func:`apply_pronunciations`
     (``Settings.PRONUNCIATIONS``) before assembly, so the ``[pause:...]``
-    tokens themselves are never rewritten.
+    tokens themselves are never rewritten. When ``spoken_date`` is given
+    (e.g. ``"July 4, 2024"``) it is spoken between the title and the body with
+    its own short pause, also passing through ``apply_pronunciations``.
     """
     clean = clean_title(title)
     body, titles = clean_body_with_sections(html, min_chars=min_chars)
     pronunciations = get_settings().PRONUNCIATIONS
     clean = apply_pronunciations(clean, pronunciations)
     body = apply_pronunciations(body, pronunciations)
+    if spoken_date:
+        spoken_date = apply_pronunciations(spoken_date, pronunciations)
+        return (
+            f"[pause:0.5s] {clean} [pause:0.5s] {spoken_date} [pause:1s] {body}",
+            titles,
+        )
     return f"[pause:0.5s] {clean} [pause:1s] {body}", titles
 
 
-def build_tts_input(title: str, html: str, min_chars: int | None = None) -> str:
+def build_tts_input(
+    title: str,
+    html: str,
+    min_chars: int | None = None,
+    spoken_date: str | None = None,
+) -> str:
     """Assemble the exact TTS input string for an article.
 
-    ``[pause:0.5s] {clean_title} [pause:1s] {clean_body}``. When ``min_chars``
-    is ``None`` the body is length-guarded with the default
-    ``Settings.MIN_TEXT_CHARS`` (raises :class:`SkipArticle`); pass an
-    explicit value to override. Both title and body pass through
-    :func:`apply_pronunciations` (``Settings.PRONUNCIATIONS``) before
-    assembly, so the ``[pause:...]`` tokens themselves are never rewritten.
+    ``[pause:0.5s] {clean_title} [pause:1s] {clean_body}`` — with
+    ``spoken_date`` given, ``[pause:0.5s] {clean_title} [pause:0.5s] {date}
+    [pause:1s] {clean_body}``. When ``min_chars`` is ``None`` the body is
+    length-guarded with the default ``Settings.MIN_TEXT_CHARS`` (raises
+    :class:`SkipArticle`); pass an explicit value to override. Both title and
+    body pass through :func:`apply_pronunciations`
+    (``Settings.PRONUNCIATIONS``) before assembly, so the ``[pause:...]``
+    tokens themselves are never rewritten.
     """
-    text, _ = build_tts_input_with_sections(title, html, min_chars=min_chars)
+    text, _ = build_tts_input_with_sections(
+        title, html, min_chars=min_chars, spoken_date=spoken_date
+    )
     return strip_section_mark(text)
 
 
@@ -522,7 +581,10 @@ def build_tts_input_from_article_with_sections(
 ) -> tuple[str, list[str]]:
     """Assemble the TTS input string and section titles from an article."""
     return build_tts_input_with_sections(
-        article.title, article.content, min_chars=min_chars
+        article.title,
+        article.content,
+        min_chars=min_chars,
+        spoken_date=_spoken_date(article.published_at, article.created_at),
     )
 
 
@@ -530,4 +592,9 @@ def build_tts_input_from_article(
     article: ArticleFull, min_chars: int | None = None
 ) -> str:
     """Assemble the TTS input string from a Wallabag :class:`ArticleFull`."""
-    return build_tts_input(article.title, article.content, min_chars=min_chars)
+    return build_tts_input(
+        article.title,
+        article.content,
+        min_chars=min_chars,
+        spoken_date=_spoken_date(article.published_at, article.created_at),
+    )

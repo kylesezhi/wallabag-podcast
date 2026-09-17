@@ -36,7 +36,12 @@ def _set_required_env(monkeypatch):
         monkeypatch.setenv(key, value)
 
 
-def _article(content: str, title: str = "Intro Test") -> ArticleFull:
+def _article(
+    content: str,
+    title: str = "Intro Test",
+    published_at: str | None = None,
+    created_at: str | None = None,
+) -> ArticleFull:
     return ArticleFull(
         id=1,
         title=title,
@@ -48,6 +53,8 @@ def _article(content: str, title: str = "Intro Test") -> ArticleFull:
         is_archived=False,
         is_starred=False,
         content=content,
+        published_at=published_at,
+        created_at=created_at,
     )
 
 
@@ -336,6 +343,118 @@ def test_build_tts_input_from_article():
     assert (
         build_tts_input_from_article(article, min_chars=0)
         == "[pause:0.5s] Intro Test [pause:1s] Article body text."
+    )
+
+
+def test_build_tts_input_from_article_speaks_published_date():
+    article = _article(
+        "<p>Article body text.</p>",
+        published_at="2024-07-04T10:34:56+0000",
+        created_at="2024-01-01T00:00:00+00:00",
+    )
+    assert (
+        build_tts_input_from_article(article, min_chars=0)
+        == "[pause:0.5s] Intro Test [pause:0.5s] July 4, 2024 [pause:1s] Article body text."
+    )
+
+
+def test_build_tts_input_from_article_falls_back_to_created_at():
+    article = _article(
+        "<p>Article body text.</p>",
+        published_at=None,
+        created_at="2024-07-04T10:34:56+00:00",
+    )
+    assert (
+        build_tts_input_from_article(article, min_chars=0)
+        == "[pause:0.5s] Intro Test [pause:0.5s] July 4, 2024 [pause:1s] Article body text."
+    )
+
+
+def test_build_tts_input_from_article_no_dates_unchanged():
+    article = _article("<p>Article body text.</p>", published_at=None, created_at=None)
+    assert (
+        build_tts_input_from_article(article, min_chars=0)
+        == "[pause:0.5s] Intro Test [pause:1s] Article body text."
+    )
+
+
+def test_build_tts_input_from_article_blank_published_falls_back():
+    article = _article(
+        "<p>Article body text.</p>",
+        published_at="",
+        created_at="2024-03-05T00:00:00+00:00",
+    )
+    assert (
+        build_tts_input_from_article(article, min_chars=0)
+        == "[pause:0.5s] Intro Test [pause:0.5s] March 5, 2024 [pause:1s] Article body text."
+    )
+
+
+def test_build_tts_input_from_article_unparseable_published_falls_back():
+    article = _article(
+        "<p>Article body text.</p>",
+        published_at="not a date",
+        created_at="2024-12-25T00:00:00+00:00",
+    )
+    assert (
+        build_tts_input_from_article(article, min_chars=0)
+        == "[pause:0.5s] Intro Test [pause:0.5s] December 25, 2024 [pause:1s] Article body text."
+    )
+
+
+def test_build_tts_input_from_article_date_only_string_accepted():
+    article = _article(
+        "<p>Article body text.</p>",
+        published_at="2024-07-04",
+        created_at=None,
+    )
+    assert (
+        build_tts_input_from_article(article, min_chars=0)
+        == "[pause:0.5s] Intro Test [pause:0.5s] July 4, 2024 [pause:1s] Article body text."
+    )
+
+
+def test_build_tts_input_from_article_epoch_junk_rejected():
+    article = _article(
+        "<p>Article body text.</p>",
+        published_at="1970-01-01T00:00:00+00:00",
+        created_at=None,
+    )
+    assert (
+        build_tts_input_from_article(article, min_chars=0)
+        == "[pause:0.5s] Intro Test [pause:1s] Article body text."
+    )
+
+
+def test_build_tts_input_with_sections_speaks_date():
+    article = _article(
+        "<p>Article body text.</p>",
+        published_at="2024-07-04T10:34:56+00:00",
+    )
+    text, titles = build_tts_input_from_article_with_sections(article, min_chars=0)
+    assert (
+        text
+        == "[pause:0.5s] Intro Test [pause:0.5s] July 4, 2024 [pause:1s] Article body text."
+    )
+    assert titles == []
+
+
+def test_build_tts_input_date_passes_through_pronunciations(monkeypatch):
+    _set_required_env(monkeypatch)
+    monkeypatch.setenv("PRONUNCIATIONS", "July=Juliette")
+    get_settings.cache_clear()
+    try:
+        result = build_tts_input(
+            "Intro Test",
+            "<p>Article body text.</p>",
+            min_chars=0,
+            spoken_date="July 4, 2024",
+        )
+    finally:
+        get_settings.cache_clear()
+    assert (
+        result
+        == "[pause:0.5s] Intro Test [pause:0.5s] Juliette 4, 2024 [pause:1s] Article body text."
     )
 
 

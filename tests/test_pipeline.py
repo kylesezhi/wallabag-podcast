@@ -608,6 +608,45 @@ def _wallabag_entry_handler(content: str):
     return handler
 
 
+async def test_generate_speaks_article_date_after_title(env, monkeypatch):
+    """An entry with published_at gets the spoken date between title and body."""
+    content = "<p>" + " ".join(["word"] * 100) + "</p>"
+    with sqlite3.connect(get_db_path()) as conn:
+        _insert_staged(conn, [(1, "Article One")])
+
+    settings = _chunk_settings(monkeypatch, 60)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/oauth/v2/token":
+            return httpx.Response(200, json=_token_response())
+        if request.url.path.startswith("/api/entries/"):
+            entry_id = int(request.url.path.split("/")[3].split(".")[0])
+            payload = _entry_payload(entry_id, content)
+            payload["published_at"] = "2024-07-04T10:34:56+00:00"
+            return httpx.Response(200, json=payload)
+        return httpx.Response(404)
+
+    wallabag = _make_wallabag(handler)
+    speech_calls: list[httpx.Request] = []
+
+    def kokoro_handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/v1/audio/speech":
+            speech_calls.append(request)
+            return httpx.Response(200, content=b"FAKE_MP3")
+        return httpx.Response(404)
+
+    kokoro = _make_kokoro(kokoro_handler)
+    monkeypatch.setattr("app.pipeline.measure_duration_seconds", lambda audio: 7)
+
+    summary = await generate_all(wallabag, kokoro, settings=settings)
+
+    assert summary["done"] == 1
+    inputs = [json.loads(call.content)["input"] for call in speech_calls]
+    assert inputs[0].startswith(
+        "[pause:0.5s] Article 1 [pause:0.5s] July 4, 2024 [pause:1s]"
+    )
+
+
 # ---------------------------------------------------------------------------
 # ID3 chapter markers
 # ---------------------------------------------------------------------------

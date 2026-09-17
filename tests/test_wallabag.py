@@ -66,6 +66,7 @@ def _meta_item(entry_id: int, title: str = None) -> dict:
         "preview_picture": "",
         "created_at": "2024-01-01T00:00:00+00:00",
         "updated_at": "2024-01-01T00:00:00+00:00",
+        "published_at": "2024-06-15T09:30:00+00:00",
     }
 
 
@@ -293,6 +294,19 @@ def test_get_entry_returns_full_content():
     assert entry.tags == ["ai"]
     assert entry.is_archived is False
     assert entry.is_starred is False
+    assert entry.created_at == "2024-01-01T00:00:00+00:00"
+    assert entry.published_at == "2024-06-15T09:30:00+00:00"
+
+
+def test_parse_meta_captures_dates_and_blank_to_none():
+    item = _meta_item(7)
+    item["created_at"] = ""
+    item["published_at"] = None
+
+    meta: ArticleMeta = WallabagClient._parse_meta(item)
+
+    assert meta.created_at is None
+    assert meta.published_at is None
 
 
 @pytest.mark.parametrize("status", [404, 500])
