@@ -6,4 +6,4 @@
 - reduce verbose comments in code
 - exclude articles with code blocks 
 - websocket connection instead of polling
-- birthday shoutouts
+- birthday shout-outs
