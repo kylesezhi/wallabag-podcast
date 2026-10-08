@@ -7,3 +7,4 @@
 - exclude articles with code blocks 
 - websocket connection instead of polling
 - birthday shout-outs
+- fix render glitch on initial render
