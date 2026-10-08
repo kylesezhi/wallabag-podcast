@@ -226,6 +226,42 @@ code {
   gap: 1.5rem;
 }
 
+/* Mobile: flatten the two columns so their cards become direct grid items of
+   .home-grid, then reorder them. Puts Podcast Subscription between the drive
+   card and the episode list (waveform card stays last). Desktop resets below. */
+.drive-column,
+.info-column {
+  display: contents;
+}
+
+.drive-card {
+  order: 1;
+}
+
+.progress-card {
+  order: 2;
+}
+
+.podcast-card {
+  order: 3;
+}
+
+.queue-header,
+.queue-filter,
+.queue-list,
+.queue-no-match,
+.queue-empty {
+  order: 4;
+}
+
+.other-podcasts {
+  order: 5;
+}
+
+.waveform-card {
+  order: 6;
+}
+
 @media (min-width: 1024px) {
   .content {
     padding: 2rem 2.5rem;
@@ -235,6 +271,16 @@ code {
     grid-template-columns: minmax(0, 2fr) minmax(0, 1fr);
     gap: 2rem;
     align-items: start;
+  }
+
+  .drive-column {
+    display: block;
+  }
+
+  .info-column {
+    display: flex;
+    flex-direction: column;
+    gap: 1.5rem;
   }
 
   .settings-grid {
