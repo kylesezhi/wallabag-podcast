@@ -8,9 +8,12 @@ the TTS engine. No LLM, no network. The pipeline:
 3. Replace section titles — h1-h6 headings and paragraphs whose entire text
    is bold (``<p><strong>Title</strong></p>``) — with
    ``[pause:1s] Title. [pause:1s]`` tokens. These tokens are app-side pause
-   directives consumed by the generation pipeline: the TTS client strips them
-   from the text before it is sent to the TTS server. The ``*_with_sections``
-   variants additionally prefix each token
+   directives: ``split_tts_text`` places every token at the start of a
+   synthesis chunk and the generation pipeline converts each such chunk into
+   generated silence followed by the remaining spoken text; tokens must
+   never reach the TTS server (the TTS client's defensive strip is the
+   second belt). The ``*_with_sections`` variants additionally prefix each
+   token
    with a private-use sentinel (``_SECTION_MARK``) and return the title
    strings in document order, so the pipeline can align every title to a
    synthesis chunk and stamp ID3 chapter markers.
@@ -22,8 +25,10 @@ the TTS engine. No LLM, no network. The pipeline:
 
 ``split_tts_text`` additionally splits a finished TTS input into sentence-boundary
 chunks (max ``Settings.TTS_MAX_CHUNK_CHARS`` chars) so the generation pipeline
-can synthesize long articles one bounded request at a time; sentences carrying a
-section-title sentinel always begin a new chunk so chapter starts are exact.
+can synthesize long articles one bounded request at a time. Every
+``[pause:Xs]`` token starts a new chunk (the pipeline turns each into
+generated silence); sentences carrying a section-title sentinel always begin
+a new chunk so chapter starts are exact.
 
 Articles whose cleaned body is shorter than ``MIN_TEXT_CHARS`` raise
 :class:`SkipArticle` so the generation pipeline can skip them.
@@ -455,9 +460,86 @@ def clean_body_with_sections(
 # contain no terminal punctuation, so a boundary can never fall inside one.
 _SENTENCE_BOUNDARY_RE = re.compile(r"(?<=[.!?])\s+")
 
+# Canonical emitted-pause grammar: lowercase ``[pause:<number>s]`` where the
+# number is an integer or decimal (``[pause:1s]``, ``[pause:0.5s]``). Both the
+# chunk splitter and :func:`strip_leading_pauses` share this one pattern, so
+# the emitted token and the parsed directive can never drift apart.
+_PAUSE_TOKEN_RE = re.compile(r"\[pause:\d+(?:\.\d+)?s\]")
+
+
+def _split_at_pause_tokens(sentence: str) -> list[str]:
+    """Fragment one sentence at every pause token.
+
+    Each occurrence of a ``[pause:Xs]`` token — optionally preceded directly
+    by ``_SECTION_MARK`` with no space (``{mark}[pause:1s]``) — starts a new
+    fragment: the text is cut immediately BEFORE the token (or before the
+    mark+token unit, so the mark stays attached to its token's fragment and
+    the two can never separate), and the token OPENS the new fragment. A
+    fragment therefore contains at most one token (its leading one), and a
+    fragment may be token-only (e.g. a closing ``[pause:1s]`` after a
+    heading, or adjacent tokens). A token preceded by neither whitespace nor
+    the mark (which the emitted grammar never produces) stays embedded in
+    the current fragment. Whitespace around the cuts collapses away, so
+    joining the fragments with single spaces reconstructs the sentence.
+    """
+    fragments: list[str] = []
+    current = ""
+    position = 0
+    for match in _PAUSE_TOKEN_RE.finditer(sentence):
+        cut = match.start()
+        # Cut before a directly-preceding mark so the mark travels with its
+        # token's fragment.
+        if cut > 0 and sentence[cut - 1] == _SECTION_MARK:
+            cut -= 1
+        # Skip a token that is embedded in running text (no whitespace or
+        # mark before it) — the emitted grammar never produces one.
+        if cut != 0 and sentence[cut - 1] not in (" ", _SECTION_MARK):
+            continue
+        prefix = sentence[position:cut].strip()
+        if prefix:
+            current = f"{current} {prefix}" if current else prefix
+        if current:
+            fragments.append(current)
+        current = sentence[cut:match.end()]
+        position = match.end()
+    tail = sentence[position:].strip()
+    if tail:
+        current = f"{current} {tail}" if current else tail
+    if current:
+        fragments.append(current)
+    return fragments
+
+
+def strip_leading_pauses(text: str) -> tuple[list[float], str]:
+    """Pop every leading ``[pause:Xs]`` token from ``text``.
+
+    Returns ``(durations, remainder)`` where ``durations`` holds each leading
+    token's seconds in order (fractions supported) and ``remainder`` is the
+    text after the last leading token, stripped of leading whitespace (the
+    same lstripping applies when there are no tokens at all — pipeline chunks
+    are whitespace-normalized, so this is always visible-neutral there).
+    Only tokens at the very start (with the mark already stripped by the
+    caller) are consumed — interior or trailing tokens stay in the remainder.
+    No tokens yields ``([], text.lstrip())``.
+    """
+    durations: list[float] = []
+    remainder = text.lstrip()
+    while True:
+        match = _PAUSE_TOKEN_RE.match(remainder)
+        if match is None:
+            break
+        durations.append(float(match.group(0)[7:-2]))
+        remainder = remainder[match.end():].lstrip()
+    return durations, remainder
+
 
 def _split_oversized_sentence(sentence: str, max_chars: int) -> list[str]:
-    """Hard-split one over-long sentence into word-boundary parts."""
+    """Hard-split one over-long sentence into word-boundary parts.
+
+    Sentences reaching this splitter are post-fragmentation pieces carrying
+    at most one pause token — their LEADING one — so the first part keeps
+    the token and no later part can hold an interior token.
+    """
     parts: list[str] = []
     current = ""
     for word in sentence.split():
@@ -476,48 +558,58 @@ def split_tts_text(text: str, max_chars: int | None = None) -> list[str]:
     """Split a TTS input string into chunks of at most ``max_chars`` characters.
 
     Chunks are assembled from whole sentences (split after terminal
-    punctuation) so every synthesized chunk ends at a natural spoken boundary.
-    A single sentence longer than ``max_chars`` is hard-split at word
-    boundaries. ``[pause:...]`` tokens are never cut in half. A sentence
-    containing a section-title sentinel (``_SECTION_MARK``) always begins a
-    new chunk, so every section title aligns with a chunk boundary — the
-    pipeline uses the cumulative duration of the preceding chunks as the
-    chapter's start time. Joining the returned chunks with single spaces
-    reconstructs the input text exactly. When ``max_chars`` is None the
-    default ``Settings.TTS_MAX_CHUNK_CHARS`` is used.
+    punctuation) so every synthesized chunk ends at a natural spoken
+    boundary; a single sentence longer than ``max_chars`` is hard-split at
+    word boundaries. ``[pause:Xs]`` tokens are app-side pause directives,
+    NOT text for the TTS server: within each sentence the text is fragmented
+    at every token (a token may be preceded by a ``_SECTION_MARK`` sentinel,
+    which stays glued to its token), and every fragment beginning with a
+    token ALWAYS starts a new chunk — the generation pipeline converts such
+    a chunk's leading tokens into generated silence before speaking the
+    rest. Token-only fragments are legal chunks. Because each fragment
+    carries at most its one leading token, no token can land mid-chunk or
+    mid-part of an oversized hard-split. A fragment carrying a section-title
+    sentinel therefore always begins a chunk too (the mark never separates
+    from its token). Joining the returned chunks with single spaces
+    reconstructs the input text exactly (the input is whitespace-normalized).
+    When ``max_chars`` is None the default ``Settings.TTS_MAX_CHUNK_CHARS``
+    is used.
     """
     limit = get_settings().TTS_MAX_CHUNK_CHARS if max_chars is None else max_chars
 
     text = text.strip()
     if not text:
         return []
-    if len(text) <= limit:
-        return [text]
 
     sentences = [s for s in _SENTENCE_BOUNDARY_RE.split(text) if s]
 
     chunks: list[str] = []
     current = ""
     for sentence in sentences:
-        # A section title (sentinel sentence) starts a new chunk. The mark may
-        # sit mid-sentence — after a previous title's trailing pause token in
-        # the consecutive-titles case — so test for containment, not a prefix.
-        if _SECTION_MARK in sentence and current:
-            chunks.append(current)
-            current = ""
-        if len(sentence) > limit:
-            # Flush what we have, then hard-split the oversized sentence.
-            if current:
+        for fragment in _split_at_pause_tokens(sentence):
+            # A fragment beginning with a pause token (with or without the
+            # mark) always opens its own chunk; the mark+token unit rule
+            # guarantees a marked fragment also begins a chunk, but keep the
+            # explicit sentinel check so both rules agree on any input.
+            starts_new = _PAUSE_TOKEN_RE.match(fragment) is not None or (
+                _SECTION_MARK in fragment and current
+            )
+            if starts_new and current:
                 chunks.append(current)
                 current = ""
-            chunks.extend(_split_oversized_sentence(sentence, limit))
-            continue
-        candidate = f"{current} {sentence}" if current else sentence
-        if len(candidate) > limit:
-            chunks.append(current)
-            current = sentence
-        else:
-            current = candidate
+            if len(fragment) > limit:
+                # Flush what we have, then hard-split the oversized fragment.
+                if current:
+                    chunks.append(current)
+                    current = ""
+                chunks.extend(_split_oversized_sentence(fragment, limit))
+                continue
+            candidate = f"{current} {fragment}" if current else fragment
+            if len(candidate) > limit:
+                chunks.append(current)
+                current = fragment
+            else:
+                current = candidate
     if current:
         chunks.append(current)
     return chunks

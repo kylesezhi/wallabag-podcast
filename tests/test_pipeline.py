@@ -15,6 +15,7 @@ import re
 import sqlite3
 import struct
 import wave
+from itertools import repeat
 
 import httpx
 import pytest
@@ -29,10 +30,8 @@ from app.db import (
     init_db,
     reset_failed_to_staged,
 )
-from app.tts import TTSClient, wav_to_mp3
 from app.logging_setup import configure_logging
 from app.pipeline import (
-    _gap_silence,
     _parse_wallabag_ref,
     add_article,
     add_random,
@@ -43,7 +42,15 @@ from app.pipeline import (
     generate_all,
     stats,
 )
-from app.textclean import build_tts_input, build_tts_input_with_sections, has_section_mark, split_tts_text, strip_section_mark
+from app.textclean import (
+    build_tts_input,
+    build_tts_input_with_sections,
+    has_section_mark,
+    split_tts_text,
+    strip_leading_pauses,
+    strip_section_mark,
+)
+from app.tts import TTSClient, encode_silence, measure_duration_seconds, wav_to_mp3
 from app.wallabag import WallabagClient, WallabagError
 
 _REQUIRED_ENV = {
@@ -150,14 +157,39 @@ def _tts_wav(sample: int = 0, frames: int = 240) -> bytes:
     return buf.getvalue()
 
 
-def _strip_pause_tokens(text: str) -> str:
-    """What the TTS client uploads for ``text``: ``[pause:Xs]`` tokens removed.
+def _expected_request_text(chunk: str) -> str:
+    """The text the pipeline actually sends to the TTS server for ``chunk``.
 
-    The TTS client defensively strips app-side pause tokens before the text
-    is sent to the server (they must never be spoken aloud), so request-level
-    assertions compare against the token-free text.
+    Mirrors the per-chunk processing order: the section mark is stripped,
+    then leading ``[pause:Xs]`` tokens are popped (they become in-process
+    silence and never reach the server). Token-only chunks send nothing at
+    all, so callers must skip empty results.
     """
-    return re.sub(r"\[pause:\d+(?:\.\d+)?s\]", "", text)
+    return strip_leading_pauses(strip_section_mark(chunk))[1]
+
+
+def _patch_measurer(monkeypatch, silences, speech=60):
+    """Patch app.pipeline.measure_duration_seconds with a dispatching fake.
+
+    Silence bytes (the exact ``encode_silence`` outputs in ``silences``) are
+    measured with the REAL mutagen function — silence durations must be the
+    truthful padded values — while every other payload (the fake TTS server's
+    MP3s) measures as ``speech`` (a constant or an iterator of values).
+    """
+    real = measure_duration_seconds
+    values = speech if callable(getattr(speech, "__next__", None)) else repeat(speech)
+
+    def fake(audio):
+        if audio in silences:
+            return real(audio)
+        return next(values)
+
+    monkeypatch.setattr("app.pipeline.measure_duration_seconds", fake)
+
+
+def _measured(audio) -> float:
+    """Real measured duration (test-side mirror of the pipeline's math)."""
+    return measure_duration_seconds(audio)
 
 
 def _form_fields(request: httpx.Request) -> dict[str, str]:
@@ -303,15 +335,28 @@ async def test_happy_path(env, monkeypatch):
 
     wallabag = _make_wallabag(_wallabag_ok_handler())
     tts = _make_tts(lambda request: httpx.Response(200, content=_tts_wav()))
-    monkeypatch.setattr("app.pipeline.measure_duration_seconds", lambda audio_path: 60)
+    # Real measurements for silence; a fixed 60 s for every speech MP3.
+    silences = {encode_silence(0.5), encode_silence(1.0)}
+    _patch_measurer(monkeypatch, silences)
+    # Each episode's TTS text "[pause:0.5s] Title [pause:1s] body" splits
+    # into an intro chunk (0.5 s leading silence) and a body chunk (1.0 s).
+    expected_bytes = (
+        encode_silence(0.5)
+        + wav_to_mp3(_tts_wav())
+        + encode_silence(1.0)
+        + wav_to_mp3(_tts_wav())
+    )
+    expected_duration = int(
+        _measured(encode_silence(0.5)) + 60 + _measured(encode_silence(1.0)) + 60
+    )
 
     summary = await generate_all(wallabag, tts, settings=get_settings())
 
     assert summary == {"total": 2, "done": 2, "failed": 0, "skipped": 0}
 
     audio_dir = env / "audio"
-    assert (audio_dir / "1.mp3").read_bytes() == wav_to_mp3(_tts_wav())
-    assert (audio_dir / "2.mp3").read_bytes() == wav_to_mp3(_tts_wav())
+    assert (audio_dir / "1.mp3").read_bytes() == expected_bytes
+    assert (audio_dir / "2.mp3").read_bytes() == expected_bytes
 
     with sqlite3.connect(get_db_path()) as conn:
         episodes = _episode_rows(conn)
@@ -319,8 +364,8 @@ async def test_happy_path(env, monkeypatch):
         assert all(e["error"] is None for e in episodes)
         assert episodes[0]["audio_path"] == str(audio_dir / "1.mp3")
         assert episodes[1]["audio_path"] == str(audio_dir / "2.mp3")
-        assert episodes[0]["duration_sec"] == 60
-        assert episodes[1]["duration_sec"] == 60
+        assert episodes[0]["duration_sec"] == expected_duration
+        assert episodes[1]["duration_sec"] == expected_duration
         # All episodes in one run share the same drive_id (first run -> 1).
         assert episodes[0]["drive_id"] == episodes[1]["drive_id"] == 1
         assert _processed_ids(conn) == [1, 2]
@@ -363,12 +408,15 @@ async def test_tts_failure_is_isolated(env, monkeypatch):
         _insert_staged(conn, [(1, "Article One"), (2, "Article Two")])
 
     wallabag = _make_wallabag(_wallabag_ok_handler())
-    # Chunk synthesis retries once on failure, so failing an episode requires
-    # TWO consecutive error responses (initial attempt + retry).
+    # Chunk synthesis retries once on failure: a chunk whose attempt AND
+    # retry both fail fails the whole episode immediately. Two consecutive
+    # error responses therefore fail episode 1 (on its intro chunk); the
+    # second episode then succeeds with one response per chunk.
     responses = [
-        httpx.Response(500, text="tts exploded"),
-        httpx.Response(500, text="tts exploded"),
-        httpx.Response(200, content=_tts_wav()),
+        httpx.Response(500, text="tts exploded"),  # ep1 intro attempt
+        httpx.Response(500, text="tts exploded"),  # ep1 intro retry -> failed
+        httpx.Response(200, content=_tts_wav()),  # ep2 intro
+        httpx.Response(200, content=_tts_wav()),  # ep2 body
     ]
     tts = _make_tts(lambda request: responses.pop(0))
     monkeypatch.setattr("app.pipeline.measure_duration_seconds", lambda audio_path: 60)
@@ -604,8 +652,8 @@ async def test_generate_all_synthesizes_in_chunks(env, monkeypatch):
     assert len(expected_chunks) > 1  # the test really exercises chunking
 
     payloads = [_tts_wav(sample=i) for i in range(len(expected_chunks))]
-    speech_calls: list[httpx.Request] = []
     payload_iter = iter(payloads)
+    speech_calls: list[httpx.Request] = []
 
     def tts_handler(request: httpx.Request) -> httpx.Response:
         if request.url.path == "/tts":
@@ -615,23 +663,46 @@ async def test_generate_all_synthesizes_in_chunks(env, monkeypatch):
 
     wallabag = _make_wallabag(_wallabag_entry_handler(content))
     tts = _make_tts(tts_handler)
-    monkeypatch.setattr("app.pipeline.measure_duration_seconds", lambda audio: 7)
+    # Real measurements for silence; fixed 7 s for every speech MP3.
+    silences = {encode_silence(0.5), encode_silence(1.0)}
+    _patch_measurer(monkeypatch, silences, speech=7)
+
+    # Expected file: per chunk, its leading-pause silences then its speech
+    # MP3 — token-only chunks contribute silence only, with no TTS call.
+    expected_pieces: list[bytes] = []
+    expected_speech_calls = 0
+    expected_total = 0.0
+    for chunk in expected_chunks:
+        durations, text = strip_leading_pauses(strip_section_mark(chunk))
+        for seconds in durations:
+            expected_pieces.append(encode_silence(seconds))
+            expected_total += _measured(encode_silence(seconds))
+        if text:
+            expected_pieces.append(wav_to_mp3(payloads[expected_speech_calls]))
+            expected_speech_calls += 1
+            expected_total += 7
+    expected_duration = int(expected_total)
 
     summary = await generate_all(wallabag, tts, settings=settings)
 
     assert summary["done"] == 1
 
-    # One request per chunk, in order, each within the char limit. The
-    # client strips the pause tokens before upload, so the observed text is
-    # the token-free chunk text.
+    # One request per spoken chunk, in order, each within the char limit.
+    # The pipeline pops the leading pauses before the request, so observed
+    # texts are token-free; token-only chunks make no request at all.
     inputs = [_form_fields(call)["text"] for call in speech_calls]
-    assert inputs == [_strip_pause_tokens(chunk) for chunk in expected_chunks]
+    assert inputs == [
+        _expected_request_text(chunk)
+        for chunk in expected_chunks
+        if _expected_request_text(chunk)
+    ]
     assert all(len(text) <= 60 for text in inputs)
+    assert len(speech_calls) == expected_speech_calls
 
-    # Chunks were appended byte-by-byte (each WAV decoded and re-encoded to
-    # MP3) to one final file; no .part remains.
+    # Bytes were appended piece-by-piece (silences + per-chunk MP3s) to one
+    # final file; no .part remains.
     audio_file = env / "audio" / "1.mp3"
-    assert audio_file.read_bytes() == b"".join(wav_to_mp3(p) for p in payloads)
+    assert audio_file.read_bytes() == b"".join(expected_pieces)
     assert not (env / "audio" / "1.mp3.part").exists()
 
     with sqlite3.connect(get_db_path()) as conn:
@@ -640,7 +711,7 @@ async def test_generate_all_synthesizes_in_chunks(env, monkeypatch):
             "FROM episodes WHERE id=1"
         ).fetchone()
     assert row[0] == "done"
-    assert row[1] == 7 * len(expected_chunks)  # summed per-chunk durations
+    assert row[1] == expected_duration  # silences + speech, real + fake
     assert (row[2], row[3]) == (len(expected_chunks), len(expected_chunks))
 
 
@@ -691,11 +762,13 @@ async def test_generate_speaks_article_date_after_title(env, monkeypatch):
     summary = await generate_all(wallabag, tts, settings=settings)
 
     assert summary["done"] == 1
+    # The multi-token intro fragments into per-token chunks; the pipeline
+    # pops each leading pause, so the requests are the bare spoken texts in
+    # assembly order.
     inputs = [_form_fields(call)["text"] for call in speech_calls]
-    expected_prefix = (
-        "[pause:0.5s] Article 1 [pause:0.5s] July 4, 2024 [pause:1s]"
-    )
-    assert inputs[0].startswith(_strip_pause_tokens(expected_prefix))
+    assert inputs[0] == "Article 1"
+    assert inputs[1] == "July 4, 2024"
+    assert inputs[2].startswith("word")
 
 
 # ---------------------------------------------------------------------------
@@ -712,12 +785,15 @@ def _sectioned_content() -> str:
 
 
 async def test_generate_embeds_chapters_with_exact_times(env, monkeypatch):
-    """Section titles become ID3 chapters; sentinels never reach the TTS
-    server.
+    """Section titles become ID3 chapters; pauses render as real silence.
 
-    The intro chapter uses the staged row title (not the article title) and
-    each section chapter starts at the cumulative duration of the preceding
-    chunks (float-precision measurement).
+    The intro chapter uses the staged row title (not the article title).
+    Each section chapter starts at the cumulative duration of all prior
+    content BEFORE its own leading-pause silence (the pause belongs inside
+    the section's chapter). Every measurement is real and deterministic:
+    silences are ``encode_silence`` outputs and speech MP3s are
+    ``wav_to_mp3(_tts_wav())``, so the expected chapters, file bytes, and
+    total are computed from the same values the pipeline used.
     """
     content = _sectioned_content()
     with sqlite3.connect(get_db_path()) as conn:
@@ -734,20 +810,32 @@ async def test_generate_embeds_chapters_with_exact_times(env, monkeypatch):
     assert len(expected_chunks) > 2  # the test really exercises chunking
     assert titles == ["Section Alpha", "Section Beta"]
 
-    # Distinct per-chunk durations (1.0s, 2.0s, ...) so start times are exact.
-    durs = [float(i + 1) for i in range(len(expected_chunks))]
-    duration_iter = iter(durs)
+    speech_mp3 = wav_to_mp3(_tts_wav())
+    speech_measured = _measured(speech_mp3)
 
+    # Mirror the pipeline's per-chunk processing order to derive the exact
+    # chapter times, total duration, and file bytes.
     expected_chapters = [(0, "Row Episode Title")]
+    expected_pieces: list[bytes] = []
+    expected_chapter_texts: list[str] = []
     cumulative = 0.0
     title_index = 0
-    for index, chunk in enumerate(expected_chunks):
-        if has_section_mark(chunk):
+    for chunk in expected_chunks:
+        if has_section_mark(chunk) and title_index < len(titles):
             expected_chapters.append(
-                (int(round(cumulative * 1000)), titles[title_index])
+                (round(cumulative * 1000), titles[title_index])
             )
             title_index += 1
-        cumulative += durs[index]
+        durations, text = strip_leading_pauses(strip_section_mark(chunk))
+        for seconds in durations:
+            silence = encode_silence(seconds)
+            expected_pieces.append(silence)
+            cumulative += _measured(silence)
+        if text:
+            expected_pieces.append(speech_mp3)
+            expected_chapter_texts.append(text)
+            cumulative += speech_measured
+    expected_total_ms = int(cumulative) * 1000
 
     calls: list = []
 
@@ -756,9 +844,6 @@ async def test_generate_embeds_chapters_with_exact_times(env, monkeypatch):
         return True
 
     monkeypatch.setattr("app.pipeline.write_id3_chapters", fake_writer)
-    monkeypatch.setattr(
-        "app.pipeline.measure_duration_seconds", lambda audio: next(duration_iter)
-    )
 
     speech_calls: list[httpx.Request] = []
 
@@ -775,19 +860,82 @@ async def test_generate_embeds_chapters_with_exact_times(env, monkeypatch):
 
     assert summary["done"] == 1
 
-    # The sentinel is stripped before every synthesis request (and the
-    # client additionally strips the pause tokens before upload).
+    # One request per spoken chunk (token-only chunks make none); texts
+    # carry neither pause tokens nor section marks.
     inputs = [_form_fields(call)["text"] for call in speech_calls]
-    assert inputs == [
-        _strip_pause_tokens(strip_section_mark(c)) for c in expected_chunks
-    ]
+    assert inputs == expected_chapter_texts
+    assert "[pause:" not in "".join(inputs)
     assert all(not has_section_mark(text) for text in inputs)
 
-    # Exactly one embed call, against the final mp3, with expected chapters.
+    # Byte-exact episode file: silences and speech interleaved per chunk.
+    assert (env / "audio" / "1.mp3").read_bytes() == b"".join(expected_pieces)
+
+    # Exactly one embed call, against the final mp3, with expected chapters
+    # and the measured total.
     assert len(calls) == 1
     assert calls[0][0] == env / "audio" / "1.mp3"
     assert calls[0][1] == expected_chapters
-    assert calls[0][2] == int(sum(durs)) * 1000
+    assert calls[0][2] == expected_total_ms
+
+    with sqlite3.connect(get_db_path()) as conn:
+        row = conn.execute(
+            "SELECT duration_sec FROM episodes WHERE id=1"
+        ).fetchone()
+    assert row[0] == int(cumulative)
+
+
+async def test_generate_token_only_chunk_makes_no_tts_call(env, monkeypatch):
+    """A chunk that is only pause tokens renders silence, making no TTS call.
+
+    Two consecutive section headings put a token-only chunk (the previous
+    title's closing pause) between the marked title chunks; the server
+    would reject empty text, so token-only chunks must be silence-only.
+    """
+    content = _sectioned_content()
+    with sqlite3.connect(get_db_path()) as conn:
+        _insert_staged(conn, [(1, "Article One")])
+
+    settings = _chunk_settings(monkeypatch, 80)
+
+    expected_tts, _titles = build_tts_input_with_sections(
+        "Article 1", content, min_chars=settings.MIN_TEXT_CHARS
+    )
+    expected_chunks = split_tts_text(expected_tts, max_chars=80)
+    token_only = [c for c in expected_chunks if not _expected_request_text(c)]
+    assert token_only, "the fixture must produce a token-only chunk"
+    assert all(c.startswith("[pause:") for c in token_only)
+
+    speech_calls: list[httpx.Request] = []
+
+    def tts_handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/tts":
+            speech_calls.append(request)
+            return httpx.Response(200, content=_tts_wav())
+        return httpx.Response(404)
+
+    wallabag = _make_wallabag(_wallabag_entry_handler(content))
+    tts = _make_tts(tts_handler)
+
+    summary = await generate_all(wallabag, tts, settings=settings)
+
+    assert summary["done"] == 1
+    # Exactly one request per spoken chunk — the token-only chunk(s) made none.
+    expected_calls = sum(
+        1 for c in expected_chunks if _expected_request_text(c)
+    )
+    assert len(speech_calls) == expected_calls
+
+    # The file still contains the token-only chunks' silence bytes.
+    silence_1s = encode_silence(1.0)
+    audio = (env / "audio" / "1.mp3").read_bytes()
+    assert silence_1s in audio
+
+    # Token-only chunks count as chunks in the persisted progress.
+    with sqlite3.connect(get_db_path()) as conn:
+        row = conn.execute(
+            "SELECT progress_done, progress_total FROM episodes WHERE id=1"
+        ).fetchone()
+    assert (row[0], row[1]) == (len(expected_chunks), len(expected_chunks))
 
 
 async def test_generate_no_sections_skips_embedding(env, monkeypatch):
@@ -844,9 +992,12 @@ async def test_generate_all_retries_failed_chunk_once(env, monkeypatch):
     with sqlite3.connect(get_db_path()) as conn:
         _insert_staged(conn, [(1, "Article One")])
 
+    # Two chunks per episode (intro + body): the intro's first attempt
+    # fails, its retry succeeds, the body synthesizes normally.
     responses = [
-        httpx.Response(500, text="transient boom"),  # initial attempt
-        httpx.Response(200, content=_tts_wav()),  # retry succeeds
+        httpx.Response(500, text="transient boom"),  # intro attempt
+        httpx.Response(200, content=_tts_wav()),  # intro retry succeeds
+        httpx.Response(200, content=_tts_wav()),  # body
     ]
     tts = _make_tts(lambda request: responses.pop(0))
     wallabag = _make_wallabag(_wallabag_ok_handler())
@@ -855,7 +1006,7 @@ async def test_generate_all_retries_failed_chunk_once(env, monkeypatch):
     summary = await generate_all(wallabag, tts, settings=get_settings())
 
     assert summary == {"total": 1, "done": 1, "failed": 0, "skipped": 0}
-    assert responses == []  # both attempts were consumed
+    assert responses == []  # all attempts were consumed
 
 
 async def test_generate_all_chunk_failure_cleans_up_part(env, monkeypatch):
@@ -922,36 +1073,62 @@ async def test_generate_cancelled_mid_chunks_cleans_up_part(env, monkeypatch):
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize(("gap_setting", "copies"), [("0", 0), ("2", 2), ("2.9", 2)])
+@pytest.mark.parametrize(
+    ("gap_setting", "copies"),
+    [("0", 0), ("0.5", 0), ("2", 2), ("2.9", 2), ("-1.5", 0)],
+)
 async def test_generate_appends_trailing_gap(
     env, monkeypatch, gap_setting, copies
 ):
-    """floor(EPISODE_GAP_SECONDS) silence copies end each episode mp3.
+    """floor(EPISODE_GAP_SECONDS) one-second silences end each episode mp3.
 
-    The packaged silent-MP3 asset is appended after the final chunk and its
-    measured duration joins the summed chunk durations; ``0`` keeps the output
-    byte-identical to a gap-free run.
+    The gap is generated in-process (``encode_silence(1.0)``, the same
+    encoder as speech) after the final chunk; its measured duration joins
+    the summed chunk durations, multiplied by the copy count. ``0`` keeps
+    the output byte-identical to a gap-free run, a positive fraction below
+    1 floors to zero copies (``int()`` truncation), and a negative value —
+    the setting is unclamped — is skipped entirely by the pipeline's
+    ``gap_seconds > 0`` guard (it never reaches ``int()``): no copies, no
+    writes, no measurement, and no gap-silence fetch. The encode-call log
+    below pins that: only the fixture's pause silences are encoded unless
+    at least one gap copy is due.
     """
-    asset = _gap_silence()
-    assert asset is not None  # the packaged asset must load in tests too
-    gap_bytes, gap_duration = asset
-
     monkeypatch.setenv("EPISODE_GAP_SECONDS", gap_setting)
     get_settings.cache_clear()
 
     with sqlite3.connect(get_db_path()) as conn:
         _insert_staged(conn, [(1, "Article One")])
 
+    # Count every silence the PIPELINE encodes (pauses + gap): the real
+    # function still produces the bytes, the delegator only records.
+    real_encode = encode_silence
+    encode_calls: list[float] = []
+
+    def counting_encode(seconds):
+        encode_calls.append(seconds)
+        return real_encode(seconds)
+
+    monkeypatch.setattr("app.pipeline.encode_silence", counting_encode)
+
     wallabag = _make_wallabag(_wallabag_ok_handler())
     tts = _make_tts(lambda request: httpx.Response(200, content=_tts_wav()))
-    monkeypatch.setattr("app.pipeline.measure_duration_seconds", lambda audio_path: 60)
+    silences = {encode_silence(0.5), encode_silence(1.0)}
+    _patch_measurer(monkeypatch, silences)
+    gap_bytes = encode_silence(1.0)
+    gap_measured = _measured(gap_bytes)
+
+    # Intro chunk (0.5 s silence + speech) then body chunk (1.0 s + speech).
+    speech_mp3 = wav_to_mp3(_tts_wav())
+    expected_bytes = (
+        encode_silence(0.5) + speech_mp3 + encode_silence(1.0) + speech_mp3
+    ) + gap_bytes * copies
 
     summary = await generate_all(wallabag, tts, settings=get_settings())
 
     assert summary == {"total": 1, "done": 1, "failed": 0, "skipped": 0}
 
     audio_file = env / "audio" / "1.mp3"
-    assert audio_file.read_bytes() == wav_to_mp3(_tts_wav()) + gap_bytes * copies
+    assert audio_file.read_bytes() == expected_bytes
     assert not (env / "audio" / "1.mp3.part").exists()
 
     with sqlite3.connect(get_db_path()) as conn:
@@ -959,8 +1136,92 @@ async def test_generate_appends_trailing_gap(
             "SELECT status, duration_sec FROM episodes WHERE id=1"
         ).fetchone()
     assert row[0] == "done"
-    # Patched per-chunk measurement (60) plus the real measured gap per copy.
-    assert row[1] == 60 + gap_duration * copies
+    # Patched per-speech measurement (60) plus the real measured silences
+    # and the measured gap per copy.
+    expected_duration = int(
+        _measured(encode_silence(0.5))
+        + 60
+        + _measured(encode_silence(1.0))
+        + 60
+        + gap_measured * copies
+    )
+    assert row[1] == expected_duration
+
+    # Encoder-guard pin: the pipeline encoded exactly the fixture's pause
+    # silences, plus exactly ONE gap fetch when copies > 0 — and none at
+    # all when the guard skips (gap 0 / sub-1 fraction / negative).
+    assert encode_calls == [0.5, 1.0] + ([1.0] if copies else [])
+
+
+async def test_generate_gap_measurement_none_falls_back_to_est_minutes(
+    env, monkeypatch
+):
+    """Only the gap measurement failing poisons the whole episode duration.
+
+    Speech and pause silences measure fine, but the GAP's measured duration
+    comes back None — the total becomes unknown, so the episode still
+    finishes ``done`` with the est_minutes fallback and gets no chapters
+    (timings are unknown).
+
+    The fixture's body-leading pause is ALSO a 1 s silence, so the fake
+    discriminates by occurrence: the first ``encode_silence(1.0)``
+    measurement is the pause (measured for real) and the second is the gap
+    measurement (the pipeline measures ONE copy and multiplies by
+    copies=2), which returns None. The recorded outcomes are asserted so
+    the test cannot pass vacuously: exactly two 1 s measurements happen,
+    the pause's was non-None (the total was healthy up to the gap), and
+    the None came from the gap.
+    """
+    monkeypatch.setenv("EPISODE_GAP_SECONDS", "2")
+    get_settings.cache_clear()
+
+    with sqlite3.connect(get_db_path()) as conn:
+        _insert_staged(conn, [(1, "Article One")])
+
+    calls: list = []
+
+    def fake_writer(path, chapters, total_ms):
+        calls.append((path, list(chapters), total_ms))
+        return True
+
+    monkeypatch.setattr("app.pipeline.write_id3_chapters", fake_writer)
+
+    one_second = encode_silence(1.0)
+    real = measure_duration_seconds
+    one_second_measurements: list[float | None] = []
+
+    def fake(audio):
+        if audio == one_second:
+            # Occurrence 1: the body-leading pause -> measure for real.
+            # Occurrence 2: the gap measurement (one call, multiplied) -> None.
+            outcome = None if one_second_measurements else real(audio)
+            one_second_measurements.append(outcome)
+            return outcome
+        if audio == encode_silence(0.5):
+            return real(audio)
+        return 60
+
+    monkeypatch.setattr("app.pipeline.measure_duration_seconds", fake)
+
+    wallabag = _make_wallabag(_wallabag_ok_handler())
+    tts = _make_tts(lambda request: httpx.Response(200, content=_tts_wav()))
+
+    summary = await generate_all(wallabag, tts, settings=get_settings())
+
+    assert summary == {"total": 1, "done": 1, "failed": 0, "skipped": 0}
+
+    # Self-proving: exactly two 1 s measurements occurred — the pause's
+    # (real, so the total was non-None up to the gap) and the gap's (None,
+    # the actual poisoning event).
+    assert one_second_measurements == [_measured(one_second), None]
+
+    with sqlite3.connect(get_db_path()) as conn:
+        row = conn.execute(
+            "SELECT status, duration_sec FROM episodes WHERE id=1"
+        ).fetchone()
+    assert row[0] == "done"
+    assert row[1] == 5 * 60  # est_minutes fallback
+    assert calls == []  # unknown total -> no chapters
 
 
 # ---------------------------------------------------------------------------
@@ -1583,8 +1844,8 @@ async def test_generate_all_skips_episode_removed_midrun(env, monkeypatch):
     summary = await generate_all(wallabag, tts, settings=get_settings())
 
     assert summary == {"total": 1, "done": 1, "failed": 0, "skipped": 0}
-    # Only the surviving episode was synthesized.
-    assert len(tts_calls) == 1
+    # Only the surviving episode was synthesized (its intro + body chunks).
+    assert len(tts_calls) == 2
     assert "Article 1" in _form_fields(tts_calls[0])["text"]
     # The removed episode left no trace: no audio file, no row, no dedupe entry.
     assert not (env / "audio" / f"{removed_id}.mp3").exists()
@@ -1633,14 +1894,18 @@ async def test_generate_all_applies_pronunciations(env, monkeypatch):
 
     try:
         summary = await generate_all(wallabag, tts, settings=get_settings())
-        sent = _form_fields(tts_calls[0])["text"]
+        sent_intro = _form_fields(tts_calls[0])["text"]
+        sent_body = _form_fields(tts_calls[1])["text"]
     finally:
         get_settings.cache_clear()
 
     assert summary == {"total": 1, "done": 1, "failed": 0, "skipped": 0}
-    assert len(tts_calls) == 1
-    assert "Jason" in sent
-    assert "JSON" not in sent
+    # Intro chunk and body chunk both carry the rewritten spoken form.
+    assert len(tts_calls) == 2
+    sent_intro = _form_fields(tts_calls[0])["text"]
+    sent_body = _form_fields(tts_calls[1])["text"]
+    assert "Jason" in sent_intro and "Jason" in sent_body
+    assert "JSON" not in sent_intro and "JSON" not in sent_body
 
 
 # ---------------------------------------------------------------------------
@@ -1749,8 +2014,9 @@ async def test_lifecycle_logs_on_success(env, monkeypatch, logging_restore):
 
     text = (env / "logs" / "wallabag-podcast.log").read_text()
     assert "Generation run started: 1 staged episodes" in text
-    assert "Generating episode 1 (wallabag=1, 1 chunks)" in text
-    assert "Episode 1 done: 60s audio, 1 chunks" in text
+    # The intro and body chunks (every pause token leads a chunk) are logged.
+    assert "Generating episode 1 (wallabag=1, 2 chunks)" in text
+    assert "Episode 1 done: 240s audio, 2 chunks" in text
 
 
 # ---------------------------------------------------------------------------

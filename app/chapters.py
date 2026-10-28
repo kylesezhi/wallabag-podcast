@@ -18,7 +18,7 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 
-from mutagen.id3 import CHAP, CTOC, CTOCFlags, ID3, TIT2
+from mutagen.id3 import CHAP, CTOC, ID3, TIT2, CTOCFlags, ID3NoHeaderError
 
 logger = logging.getLogger(__name__)
 
@@ -34,14 +34,22 @@ def write_id3_chapters(
 
     ``chapters`` is an ordered list of ``(start_ms, title)`` pairs; the first
     is conventionally 0 (the intro chapter). The last chapter's end time is
-    ``total_ms``; earlier chapters end at the next chapter's start. Returns
-    True on success and False on any failure — never raises, so chapter
-    tagging can never break an otherwise finished episode.
+    ``total_ms``; earlier chapters end at the next chapter's start. A file
+    that has no ID3 header yet (all lameenc output) is tagged from an empty
+    tag. The function does NOT validate MP3-ness — callers must pass a
+    generated MP3 path (the pipeline does). Returns True on success and
+    False on any failure — never raises, so chapter tagging can never break
+    an otherwise finished episode.
     """
     if not chapters:
         return False
     try:
-        tags = ID3(path)
+        try:
+            tags = ID3(path)
+        except ID3NoHeaderError:
+            # lameenc output carries no ID3 header (the old TTS server's
+            # MP3s did); start from a fresh tag so chapters still embed.
+            tags = ID3()
         child_ids: list[str] = []
         for index, (start_ms, title) in enumerate(chapters):
             element_id = f"chp{index}"

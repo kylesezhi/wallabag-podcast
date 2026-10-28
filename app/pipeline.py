@@ -12,15 +12,18 @@
 - ``delete_podcast`` removes a podcast's rows, dedupe entries, and audio files.
 - ``generate_all()`` produces one MP3 per staged episode: fetch the full
   Wallabag entry, clean the HTML into TTS input, split it into bounded chunks
-  (``Settings.TTS_MAX_CHUNK_CHARS``), synthesize each chunk with the TTS
-  server and append the bytes straight to ``DATA_DIR/audio/{id}.mp3.part``
-  (constant RAM; chunk progress is persisted for the UI), atomically rename
-  the finished part file to ``{id}.mp3``, record the summed per-chunk
-  duration, and mark the episode ``done`` (recording a processed_articles row).
-  When the article has
+  (``Settings.TTS_MAX_CHUNK_CHARS``) — every ``[pause:Xs]`` token leads a
+  chunk and is rendered as generated silence in-process (same MP3 encoder as
+  speech, so pause/gap/speech audio is homogeneous) — and each chunk's bytes
+  are appended straight to ``DATA_DIR/audio/{id}.mp3.part`` (constant RAM;
+  chunk progress is persisted for the UI). The finished part file is
+  atomically renamed to ``{id}.mp3``, the summed per-chunk duration is
+  recorded, and the episode is marked ``done`` (recording a
+  processed_articles row). When the article has
   section titles, ID3v2 chapter markers are embedded into the finished MP3 —
   an intro chapter at 0:00 titled by the episode, then one chapter per section
-  title timed from the cumulative per-chunk durations. Failures are isolated
+  title timed from the cumulative per-chunk durations (including inserted
+  silence). Failures are isolated
   per episode: a bad article marks that episode ``failed`` and the run
   continues with the next one.
 """
@@ -34,8 +37,6 @@ import os
 import random
 import re
 import sqlite3
-from functools import lru_cache
-from importlib import resources
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -62,13 +63,13 @@ from .db import (
     set_episode_generating,
     set_episode_progress,
 )
-from .tts import TTSClient, TTSError, measure_duration_seconds
-from .tts import measure_duration as _measure_asset_duration
+from .tts import TTSClient, TTSError, encode_silence, measure_duration_seconds
 from .textclean import (
     SkipArticle,
     build_tts_input_from_article_with_sections,
     has_section_mark,
     split_tts_text,
+    strip_leading_pauses,
     strip_section_mark,
 )
 from .wallabag import WallabagClient, WallabagError
@@ -408,32 +409,6 @@ async def _synthesize_with_retry(
         return await tts_client.synthesize(text, voice=voice)
 
 
-@lru_cache(maxsize=1)
-def _gap_silence() -> tuple[bytes, int] | None:
-    """Load the packaged end-of-episode silence asset.
-
-    Returns ``(mp3_bytes, measured_seconds)`` for ``app/assets/gap_1s.mp3`` —
-    one second of silence at the same sample rate and channel count as the
-    synthesized speech (24 kHz mono). TRANSITIONAL: the packaged asset is
-    128 kbps while speech MP3s are now CBR 64 kbps — mixed bitrates still
-    concatenate into valid MP3 (frames are self-describing), so appended
-    playback stays seamless, but the asset is scheduled for removal in the
-    next task, which switches the gap to ``encode_silence``. Returns None
-    when the asset is missing or unparseable, so generation proceeds without
-    the pause instead of failing. Duration is measured directly via mutagen
-    rather than the ``measure_duration`` indirection so test patches of chunk
-    measurement cannot skew the gap's contribution.
-    """
-    try:
-        data = resources.files("app").joinpath("assets/gap_1s.mp3").read_bytes()
-    except OSError:
-        return None
-    duration = _measure_asset_duration(data)
-    if duration is None:
-        return None
-    return data, duration
-
-
 async def _synthesize_chunks(
     conn: sqlite3.Connection,
     tts_client: TTSClient,
@@ -448,26 +423,36 @@ async def _synthesize_chunks(
     """Synthesize ``chunks`` sequentially, appending each MP3 to ``part_path``.
 
     Only one chunk's audio is ever held in memory: bytes are appended to the
-    ``.part`` file as soon as a request returns. Chunk progress is persisted
-    before/after every synthesis so the UI can show "done/total". After the
-    final chunk, ``floor(gap_seconds)`` copies of the packaged silent-MP3 gap
-    are appended (when > 0 and the asset loads) so episodes have an audible
-    end boundary; the gap's duration is included in the returned total.
-    On success the part file is atomically renamed to its final ``{id}.mp3``
-    path. Returns ``(final_path, duration_sec)`` where the duration is the sum
-    of per-chunk mutagen measurements plus the gap — None when any chunk is
-    unparseable (the caller then falls back to est_minutes). Raises on failure
-    after any number of chunks; the caller removes the stale ``.part`` file.
+    ``.part`` file as soon as they are produced. Pauses are CLIENT-side:
+    every chunk's leading ``[pause:Xs]`` tokens (a token always opens its
+    chunk, per :func:`split_tts_text`) are converted to generated silence
+    (:func:`encode_silence`) and written before the chunk's spoken text; a
+    chunk that is only tokens makes no TTS call at all (the server rejects
+    empty text). Chunk progress is persisted before/after every chunk so the
+    UI can show "done/total" — token-only chunks count as chunks. After the
+    final chunk, ``floor(gap_seconds)`` one-second silences (the same cached
+    ``encode_silence(1.0)`` bytes) are appended so episodes have an audible
+    end boundary; the gap's measured duration is included in the returned
+    total. On success the part file is atomically renamed to its final
+    ``{id}.mp3`` path. Returns ``(final_path, duration_sec)`` where the
+    duration is the sum of all measured pieces (silences + synthesized
+    chunks + gap) — None when any piece is unparseable (the caller then
+    falls back to est_minutes). Raises on failure after any number of
+    chunks; the caller removes the stale ``.part`` file.
 
     Chapter markers: when ``section_titles`` is given, each chunk whose text
     carries a section-title sentinel (``has_section_mark``) starts a chapter
-    whose start time is the cumulative duration of all prior chunks; sentinels
-    are stripped from chunk text before every TTS call so they never reach
-    the TTS server. When at least one section chapter exists, an intro chapter
-    titled ``intro_title`` is prepended at 0:00. Chapters are embedded into the
-    renamed file via :func:`write_id3_chapters` — skipped when the total
-    duration is unknown (unparseable audio) or there are no sections, and a
-    failure to embed is warning-only.
+    whose start time is the cumulative duration of all prior content —
+    computed BEFORE this chunk's leading-pause silence is written, so a
+    section's leading pause belongs inside its chapter (matching the
+    pre-Pocket-TTS semantics where the token sat inside the section's
+    synthesis chunk). Sentinels are stripped from chunk text before every
+    TTS call so they never reach the TTS server. When at least one section
+    chapter exists, an intro chapter titled ``intro_title`` is prepended at
+    0:00. Chapters are embedded into the renamed file via
+    :func:`write_id3_chapters` — skipped when the total duration is unknown
+    (unparseable audio) or there are no sections, and a failure to embed is
+    warning-only.
     """
     final_path = part_path.with_name(part_path.name.removesuffix(".part"))
     total: float | None = 0.0
@@ -477,32 +462,56 @@ async def _synthesize_chunks(
     with part_path.open("wb") as part_file:
         set_episode_progress(conn, episode_id, 0, len(chunks))
         for index, chunk in enumerate(chunks):
+            # Chapter start BEFORE the chunk's leading-pause silence: the
+            # pause belongs inside the section's chapter.
             if has_section_mark(chunk) and title_index < len(section_titles):
                 start_ms = int(round(total * 1000)) if total is not None else 0
                 chapters.append((start_ms, section_titles[title_index]))
                 title_index += 1
-            audio_bytes = await _synthesize_with_retry(
-                tts_client, strip_section_mark(chunk), voice
-            )
-            if total is not None:
-                chunk_duration = measure_duration_seconds(audio_bytes)
-                if chunk_duration is None:
-                    total = None
-                else:
-                    total += chunk_duration
-            part_file.write(audio_bytes)
+            text = strip_section_mark(chunk)
+            durations, text = strip_leading_pauses(text)
+            for seconds in durations:
+                silence = encode_silence(seconds)
+                if not silence:
+                    # A never-emitted d <= 0 token: tolerate by skipping.
+                    continue
+                part_file.write(silence)
+                if total is not None:
+                    measured = measure_duration_seconds(silence)
+                    if measured is None:
+                        # Same consequence as an unparseable chunk: the
+                        # episode total becomes unknown.
+                        total = None
+                    else:
+                        total += measured
+            if text:
+                audio_bytes = await _synthesize_with_retry(tts_client, text, voice)
+                if total is not None:
+                    chunk_duration = measure_duration_seconds(audio_bytes)
+                    if chunk_duration is None:
+                        total = None
+                    else:
+                        total += chunk_duration
+                part_file.write(audio_bytes)
             set_episode_progress(conn, episode_id, index + 1, len(chunks))
-        gap = _gap_silence() if gap_seconds > 0 else None
-        if gap is not None:
-            # int() floors positive floats: whole 1-second units only. The
-            # writes contain no awaits, so a cancellation cannot interrupt
-            # mid-gap and leave a partially padded file behind the rename.
-            gap_bytes, gap_duration = gap
+        if gap_seconds > 0:
+            # int() floors positive floats: whole 1-second units only (a
+            # positive value below 1 floors to zero copies). The gap is the
+            # same cached ``encode_silence(1.0)`` bytes every time, so one
+            # measured duration is multiplied by the copy count. The writes
+            # contain no awaits, so a cancellation cannot interrupt mid-gap
+            # and leave a partially padded file behind the rename.
             copies = int(gap_seconds)
-            for _ in range(copies):
-                part_file.write(gap_bytes)
-            if total is not None:
-                total += gap_duration * copies
+            if copies > 0:
+                gap_bytes = encode_silence(1.0)
+                for _ in range(copies):
+                    part_file.write(gap_bytes)
+                if total is not None:
+                    gap_duration = measure_duration_seconds(gap_bytes)
+                    if gap_duration is None:
+                        total = None
+                    else:
+                        total += gap_duration * copies
     os.replace(part_path, final_path)
     duration = int(total) if total is not None else None
     if duration is not None and chapters:
@@ -527,10 +536,14 @@ async def generate_all(
     or global — draws one global drive_id and behaves identically.
 
     Each episode's TTS text is split into bounded chunks
-    (``Settings.TTS_MAX_CHUNK_CHARS``) that are synthesized sequentially and
-    appended to ``{id}.mp3.part``; chunk progress (done/total) is persisted so
+    (``Settings.TTS_MAX_CHUNK_CHARS``) that are processed sequentially: each
+    chunk's leading ``[pause:Xs]`` tokens become in-process generated silence
+    (appended before the spoken text, which itself goes through the TTS
+    server) and the combined bytes are appended to ``{id}.mp3.part``; chunk
+    progress (done/total) is persisted so
     the UI can poll it, and the finished part file is atomically renamed to the
-    final MP3. ``Settings.EPISODE_GAP_SECONDS`` of trailing silence is appended
+    final MP3. ``Settings.EPISODE_GAP_SECONDS`` of trailing silence (rendered
+    by the same in-process encoder) is appended
     after the last chunk so adjacent episodes have an audible boundary.
 
     Returns a summary dict ``{"total": N, "done": M, "failed": K, "skipped": L}``.

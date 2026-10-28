@@ -866,6 +866,109 @@ def test_split_mixed_sentences_and_oversized():
     assert all(len(chunk) <= 40 for chunk in chunks)
 
 
+def test_split_intro_with_unpunctuated_title_and_date():
+    """Multi-token intro sentences fragment at every token.
+
+    The title/date assembly can put several tokens inside one "sentence"
+    when the title lacks terminal punctuation; each token must lead its own
+    chunk (the pipeline turns each into generated silence).
+    """
+    text = "[pause:0.5s] Some Title [pause:0.5s] July 4, 2024 [pause:1s] Body text."
+    chunks = split_tts_text(text, max_chars=200)
+    assert chunks == [
+        "[pause:0.5s] Some Title",
+        "[pause:0.5s] July 4, 2024",
+        "[pause:1s] Body text.",
+    ]
+
+
+def test_split_adjacent_tokens_produce_token_only_chunks():
+    text = "[pause:1s] [pause:0.5s] body"
+    chunks = split_tts_text(text, max_chars=200)
+    assert chunks == ["[pause:1s]", "[pause:0.5s] body"]
+    assert " ".join(chunks) == text
+
+
+def test_split_oversized_fragment_leading_token_stays_first():
+    """A hard-split fragment keeps its leading token in the first part."""
+    text = "[pause:1s] " + " ".join(["word"] * 40)
+    chunks = split_tts_text(text, max_chars=50)
+    assert " ".join(chunks) == text
+    assert chunks[0].startswith("[pause:1s] ")
+    assert all("[pause:" not in c for c in chunks[1:])
+    assert all(len(c) <= 50 for c in chunks)
+
+
+def test_split_reconstruction_invariant_with_tokens():
+    """Join-with-spaces reconstructs the input for token-bearing inputs."""
+    texts = [
+        "[pause:0.5s] Title. [pause:1s] Body.",
+        "[pause:1s] [pause:0.5s] body",
+        "\ue000[pause:1s] Heading. [pause:1s] trailing words",
+        "[pause:0.5s] Some Title [pause:0.5s] Date [pause:1s] Body.",
+        "plain text. [pause:1s] after a sentence.",
+    ]
+    for text in texts:
+        assert " ".join(split_tts_text(text, max_chars=30)) == text, text
+
+
+# ---------------------------------------------------------------------------
+# 10b. strip_leading_pauses (pipeline pause directive parser)
+# ---------------------------------------------------------------------------
+
+
+def test_strip_leading_pauses_multiple_and_fractional():
+    from app.textclean import strip_leading_pauses
+
+    durations, remainder = strip_leading_pauses(
+        "[pause:1s] [pause:0.5s] hello world"
+    )
+    assert durations == [1.0, 0.5]
+    assert remainder == "hello world"
+
+
+def test_strip_leading_pauses_no_tokens_returns_text():
+    from app.textclean import strip_leading_pauses
+
+    assert strip_leading_pauses("plain text") == ([], "plain text")
+    assert strip_leading_pauses("") == ([], "")
+
+
+def test_strip_leading_pauses_lstrips_remainder():
+    """The remainder is lstripped — before tokens and in the no-token case.
+
+    Pins the actual contract documented in ``strip_leading_pauses``: leading
+    whitespace between/after tokens never survives, and a tokenless input
+    with leading whitespace also comes back lstripped.
+    """
+    from app.textclean import strip_leading_pauses
+
+    # Leading whitespace before the first token, and between tokens.
+    durations, remainder = strip_leading_pauses(
+        "  [pause:0.5s]   [pause:1s]  body text"
+    )
+    assert durations == [0.5, 1.0]
+    assert remainder == "body text"
+
+    # No tokens but leading whitespace: the remainder is still lstripped.
+    assert strip_leading_pauses("   indented text") == ([], "indented text")
+
+
+def test_strip_leading_pauses_only_consumes_leading_tokens():
+    """Trailing/interior tokens stay in the remainder untouched."""
+    from app.textclean import strip_leading_pauses
+
+    durations, remainder = strip_leading_pauses(
+        "[pause:0.5s] speak [pause:1s] more"
+    )
+    assert durations == [0.5]
+    assert remainder == "speak [pause:1s] more"
+
+    durations, remainder = strip_leading_pauses("nope [pause:1s]")
+    assert durations == []
+    assert remainder == "nope [pause:1s]"
+
+
 def test_split_uses_settings_default(monkeypatch):
     _set_required_env(monkeypatch)
     monkeypatch.setenv("TTS_MAX_CHUNK_CHARS", "30")
@@ -894,19 +997,21 @@ def test_split_starts_new_chunk_at_section_title():
     assert " ".join(chunks) == text
     marked = [c for c in chunks if has_section_mark(c)]
     assert len(marked) == 1
-    # The intro's trailing pause attaches forward, so the title sentence is
-    # "[pause:1s] \ue000[pause:1s] Part One." and it opens its own chunk.
-    assert marked[0].startswith("[pause:1s] \ue000[pause:1s] Part One.")
-    # The intro sentence never shares a chunk with the section title.
-    intro_chunks = [c for c in chunks if "[pause:0.5s]" in c]
-    assert len(intro_chunks) == 1
-    assert not has_section_mark(intro_chunks[0])
+    # The mark+token unit always leads its chunk: the intro's trailing pause
+    # became its own token-only chunk, so the marked fragment begins directly
+    # with the sentinel.
+    assert marked[0].startswith("\ue000[pause:1s] Part One.")
+    # The intro's leading token opens the first chunk and the closing pause
+    # is a token-only chunk between intro and title.
+    assert chunks[0] == "[pause:0.5s] Intro."
+    assert "[pause:1s]" in chunks
+    assert not has_section_mark(chunks[0])
 
 
 def test_split_consecutive_titles_each_begin_their_own_chunk():
-    # Consecutive titles: each marked sentence follows a previous title's
-    # trailing pause token, so the mark sits mid-sentence — the rule must be
-    # "contains", not "starts with".
+    # Consecutive titles: each marked fragment follows a previous title's
+    # trailing pause token, which becomes its own token-only chunk; the
+    # mark+token unit starts the title's chunk and is never separated.
     text = (
         "[pause:0.5s] Intro. [pause:1s] "
         "\ue000[pause:1s] One. [pause:1s] "
@@ -917,11 +1022,33 @@ def test_split_consecutive_titles_each_begin_their_own_chunk():
     assert " ".join(chunks) == text
     marked = [c for c in chunks if has_section_mark(c)]
     assert len(marked) == 2
-    assert marked[0].startswith("[pause:1s] \ue000[pause:1s] One.")
-    assert marked[1].startswith("[pause:1s] \ue000[pause:1s] Two.")
+    assert marked[0].startswith("\ue000[pause:1s] One.")
+    assert marked[1].startswith("\ue000[pause:1s] Two.")
+    # The intro's and first title's closing pauses are token-only chunks;
+    # the second title's closing pause opens the body's chunk instead.
+    token_only = [c for c in chunks if c == "[pause:1s]"]
+    assert len(token_only) == 2
 
 
-def test_split_single_marked_text_is_one_chunk():
-    text = "[pause:0.5s] Title [pause:1s] \ue000[pause:1s] One. [pause:1s] Body."
-    chunks = split_tts_text(text, max_chars=200)
-    assert chunks == [text]
+def test_split_every_pause_token_leads_its_chunk():
+    """The new contract: every ``[pause:Xs]`` token opens a chunk.
+
+    Scans every chunk with the token regex — a token may sit at position 0
+    or (behind its sentinel mark) at position 1, nowhere else.
+    """
+    import re
+
+    from app.textclean import _PAUSE_TOKEN_RE
+
+    text = (
+        "[pause:0.5s] Title. [pause:1s] First sentence here. "
+        "\ue000[pause:1s] Heading. [pause:1s] "
+        + " ".join(["filler"] * 20) + "."
+    )
+    chunks = split_tts_text(text, max_chars=45)
+    assert " ".join(chunks) == text
+    for chunk in chunks:
+        for match in _PAUSE_TOKEN_RE.finditer(chunk):
+            assert match.start() == 0 or (
+                match.start() == 1 and chunk[0] == "\ue000"
+            ), f"interior token in {chunk!r}"

@@ -1,20 +1,23 @@
 """Tests for ID3v2 chapter embedding (app/chapters.py).
 
-Uses the packaged silent MP3 asset as a real, offline MP3 fixture so the
-mutagen write/read round-trip is exercised against actual frame data.
+Builds a small real MP3 in-process (the same lameenc encoder the pipeline
+uses) so the mutagen write/read round-trip is exercised against actual
+frame data, fully offline.
 """
 
 from pathlib import Path
 
-from mutagen.id3 import ID3
+import pytest
+from mutagen.id3 import ID3, ID3NoHeaderError
 
 from app.chapters import write_id3_chapters
+from app.tts import encode_silence
 
 
 def _mp3(tmp_path: Path) -> Path:
-    src = Path(__file__).parent.parent / "app" / "assets" / "gap_1s.mp3"
+    """A ~3-second real MP3 fixture (three seconds of silence)."""
     target = tmp_path / "episode.mp3"
-    target.write_bytes(src.read_bytes())
+    target.write_bytes(encode_silence(3.0))
     return target
 
 
@@ -61,10 +64,19 @@ def test_last_chapter_end_clamps_to_total_ms(tmp_path):
 def test_empty_chapters_is_noop(tmp_path):
     path = _mp3(tmp_path)
     assert write_id3_chapters(path, [], total_ms=1000) is False
-    assert ID3(path).getall("CHAP") == []
+    # Nothing was written: a lameenc fixture has no ID3 header at all.
+    with pytest.raises(ID3NoHeaderError):
+        ID3(path)
 
 
 def test_embedding_failure_returns_false_without_raising(tmp_path):
-    bogus = tmp_path / "not_an_mp3.mp3"
-    bogus.write_bytes(b"this is not an mp3 file")
-    assert write_id3_chapters(bogus, [(0, "X")], total_ms=1000) is False
+    """An unopenable file fails embedding without raising.
+
+    The missing path is the remaining genuine failure path: a bogus-bytes
+    file is now legitimately embeddable by design (no ID3 header -> empty
+    tag, and mutagen ignores non-audio payload), so unopenable paths are
+    what still exercises the failure return.
+    """
+    # An unopenable file (missing path) fails embedding without raising.
+    missing = tmp_path / "missing.mp3"
+    assert write_id3_chapters(missing, [(0, "X")], total_ms=1000) is False

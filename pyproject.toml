@@ -34,7 +34,7 @@ build-backend = "setuptools.build_meta"
 include = ["app*"]
 
 [tool.setuptools.package-data]
-app = ["assets/*.mp3", "assets/fonts/*.ttf", "assets/fonts/LICENSE.txt"]
+app = ["assets/fonts/*.ttf", "assets/fonts/LICENSE.txt"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

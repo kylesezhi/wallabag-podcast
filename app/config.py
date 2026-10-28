@@ -83,9 +83,9 @@ class Settings(BaseSettings):
     MAX_FETCH_PAGES: int = 50
     # Seconds of trailing silence appended to each finished episode so
     # back-to-back playback has an audible boundary between articles.
-    # Rendered by repeating the packaged 1-second silent MP3
-    # (app/assets/gap_1s.mp3, 24 kHz mono MP3); fractional values floor to
-    # whole seconds, 0 disables the pause.
+    # Rendered in-process by the same MP3 encoder as the synthesized speech
+    # (64 kbps mono at 24 kHz, so concatenated playback is homogeneous);
+    # fractional values floor to whole seconds, 0 disables the pause.
     EPISODE_GAP_SECONDS: float = 3.0
     FEED_TITLE: str = "Kyle's Morning Podcast"
     # Verbosity for the app + uvicorn loggers (root level). DEBUG/INFO/WARNING/ERROR.
