@@ -29,6 +29,7 @@ from app.db import (
     get_podcasts,
     get_setting,
     init_db,
+    set_setting,
 )
 from app.main import _human_duration, app
 from app.pipeline import delete_podcast
@@ -233,13 +234,11 @@ class _ArchiveSpyWallabag:
 class _MockTTS:
     """Minimal async mock matching TTSClient's public surface."""
 
-    def __init__(self, voice_list: list[dict[str, str]] | None = None):
-        self._voices = (
-            voice_list if voice_list is not None else list(BUILTIN_VOICES)
-        )
+    def __init__(self, reachable: bool = True):
+        self._reachable = reachable
 
-    async def voices(self) -> list[dict[str, str]]:
-        return list(self._voices)
+    async def health(self) -> bool:
+        return self._reachable
 
     async def aclose(self) -> None:
         pass
@@ -665,32 +664,66 @@ def test_settings_page_wallabag_fail(client):
     assert "not connected" in response.text.lower()
 
 
-def test_settings_page_tts_voices_failure_falls_back_to_default(client):
-    """A raising TTS client must not break the settings page.
-
-    The route wraps ``voices()`` in try/except: on failure the dropdown
-    falls back to a single entry built from ``TTS_DEFAULT_VOICE`` and the
-    failure is surfaced as a notice.
-    """
-
-    class _BrokenTTS:
-        async def voices(self):
-            raise RuntimeError("unreachable")
-
-        async def aclose(self) -> None:
-            pass
-
+def test_settings_page_lists_all_builtin_voices(client):
+    """The dropdown is the static BUILTIN_VOICES list; default selected."""
     app.state.wallabag_client = _MockWallabag(connected=True)
-    app.state.tts_client = _BrokenTTS()
+    app.state.tts_client = _MockTTS()
 
     response = client.get("/settings")
 
     assert response.status_code == 200
-    # Fallback dropdown option carries the configured default voice id...
-    assert 'value="charles"' in response.text
-    # ...and the failure notice names the engine and the cause.
-    assert "TTS voices unavailable" in response.text
+    for voice in BUILTIN_VOICES:
+        assert f'value="{voice["id"]}"' in response.text
+        assert voice["label"] in response.text
+    # Exactly 21 voice options (the automation select's option has no
+    # value attribute), no live voices() call involved.
+    assert response.text.count('<option value="') == len(BUILTIN_VOICES)
+    # Fresh DB seeds TTS_DEFAULT_VOICE, so it renders selected.
+    default = get_settings().TTS_DEFAULT_VOICE
+    assert f'value="{default}" selected' in response.text
+
+
+def test_settings_page_selects_stored_voice(client):
+    """A stored (valid) voice wins over the configured default."""
+    app.state.wallabag_client = _MockWallabag(connected=True)
+    app.state.tts_client = _MockTTS()
+    with sqlite3.connect(get_db_path()) as conn:
+        set_setting(conn, "voice", "marius")
+
+    response = client.get("/settings")
+
+    assert response.status_code == 200
+    assert 'value="marius" selected' in response.text
+    default = get_settings().TTS_DEFAULT_VOICE
+    assert f'value="{default}" selected' not in response.text
+
+
+def test_settings_page_tts_reachable_badge(client):
+    app.state.wallabag_client = _MockWallabag(connected=True)
+    app.state.tts_client = _MockTTS(reachable=True)
+
+    response = client.get("/settings")
+
+    assert response.status_code == 200
+    assert "TTS server:" in response.text
+    assert "reachable" in response.text
+    assert "status-badge-done" in response.text
+    # No hint when the server is up.
+    assert "pocket-tts serve" not in response.text
+
+
+def test_settings_page_tts_unreachable_badge_and_hint(client):
+    app.state.wallabag_client = _MockWallabag(connected=True)
+    app.state.tts_client = _MockTTS(reachable=False)
+
+    response = client.get("/settings")
+
+    assert response.status_code == 200
+    assert "TTS server:" in response.text
     assert "unreachable" in response.text
+    assert "status-badge-failed" in response.text
+    # The hint tells the user how to start the server.
+    assert "pocket-tts serve" in response.text
 
 
 # ---------------------------------------------------------------------------
@@ -1814,7 +1847,7 @@ def test_home_renders_generating_row_with_progress(client):
 def test_save_settings(client):
     response = client.post(
         "/settings",
-        data={"articles_per_drive": "15", "voice": "af_blossom"},
+        data={"articles_per_drive": "15", "voice": "marius"},
         follow_redirects=False,
     )
 
@@ -1822,13 +1855,13 @@ def test_save_settings(client):
     assert "message" in response.headers["location"]
     with sqlite3.connect(get_db_path()) as conn:
         assert get_setting(conn, "articles_per_drive") == "15"
-        assert get_setting(conn, "voice") == "af_blossom"
+        assert get_setting(conn, "voice") == "marius"
 
 
 def test_save_settings_invalid_number(client):
     response = client.post(
         "/settings",
-        data={"articles_per_drive": "abc", "voice": "af_heart"},
+        data={"articles_per_drive": "abc", "voice": "marius"},
         follow_redirects=False,
     )
 
@@ -1841,7 +1874,7 @@ def test_save_settings_invalid_number(client):
 def test_save_settings_out_of_range(client):
     response = client.post(
         "/settings",
-        data={"articles_per_drive": "100", "voice": "af_heart"},
+        data={"articles_per_drive": "100", "voice": "marius"},
         follow_redirects=False,
     )
 
@@ -1860,10 +1893,47 @@ def test_save_settings_empty_voice(client):
     assert "error" in response.headers["location"]
 
 
+def test_save_settings_unknown_voice_redirect(client):
+    """A voice outside BUILTIN_VOICES is rejected on the plain-form path."""
+    response = client.post(
+        "/settings",
+        data={"articles_per_drive": "10", "voice": "bm_daniel"},
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 303
+    assert "error" in response.headers["location"]
+    # The exact encoded message, matching the JSON path's rigor.
+    from urllib.parse import unquote_plus
+
+    assert "Unknown voice — pick one from the list" in unquote_plus(
+        response.headers["location"]
+    )
+    with sqlite3.connect(get_db_path()) as conn:
+        assert get_setting(conn, "voice") != "bm_daniel"
+
+
+def test_save_settings_json_unknown_voice(client):
+    """The autosave fetch path gets a 400 JSON error for an unknown voice."""
+    response = client.post(
+        "/settings",
+        data={"articles_per_drive": "10", "voice": "not-a-voice"},
+        headers={"Accept": "application/json"},
+    )
+
+    assert response.status_code == 400
+    assert response.json() == {
+        "ok": False,
+        "error": "Unknown voice — pick one from the list",
+    }
+    with sqlite3.connect(get_db_path()) as conn:
+        assert get_setting(conn, "voice") != "not-a-voice"
+
+
 def test_save_settings_json_ok(client):
     response = client.post(
         "/settings",
-        data={"articles_per_drive": "12", "voice": "af_blossom"},
+        data={"articles_per_drive": "12", "voice": "marius"},
         headers={"Accept": "application/json"},
     )
 
@@ -1871,13 +1941,13 @@ def test_save_settings_json_ok(client):
     assert response.json() == {"ok": True}
     with sqlite3.connect(get_db_path()) as conn:
         assert get_setting(conn, "articles_per_drive") == "12"
-        assert get_setting(conn, "voice") == "af_blossom"
+        assert get_setting(conn, "voice") == "marius"
 
 
 def test_save_settings_json_invalid(client):
     response = client.post(
         "/settings",
-        data={"articles_per_drive": "abc", "voice": "af_heart"},
+        data={"articles_per_drive": "abc", "voice": "marius"},
         headers={"Accept": "application/json"},
     )
 
@@ -2077,7 +2147,14 @@ class _JourneyWallabag:
 
 
 class _JourneyTTS:
-    """Fake TTS client returning unparseable bytes (duration fallback)."""
+    """Fake TTS client returning unparseable bytes (duration fallback).
+
+    Matches the TTSClient surface the routes touch: the settings page calls
+    ``health()``, so the fake reports reachable.
+    """
+
+    async def health(self) -> bool:
+        return True
 
     async def synthesize(self, text: str, voice: str | None = None) -> bytes:
         return b"FAKE_MP3_BYTES"

@@ -281,17 +281,6 @@ class TTSClient:
 
     # -- public API ---------------------------------------------------------
 
-    async def voices(self) -> list[dict[str, str]]:
-        """Return the built-in voices as ``[{"id": ..., "label": ...}, ...]``.
-
-        TRANSITIONAL: the settings route still calls this (wrapped in
-        try/except), but Pocket TTS has no voices endpoint — the list is the
-        static :data:`BUILTIN_VOICES` constant, so this can no longer fail
-        and performs no network I/O. The settings UI will embed the list
-        statically and stop calling this.
-        """
-        return list(BUILTIN_VOICES)
-
     async def health(self) -> bool:
         """Return True when the TTS service answers ``GET /health`` with 2xx.
 

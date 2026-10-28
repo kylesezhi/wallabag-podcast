@@ -587,16 +587,6 @@ def test_builtin_voices_contract():
         assert voice["label"].strip()
 
 
-async def test_voices_returns_builtin_list_without_network():
-    def handler(request: httpx.Request) -> httpx.Response:
-        raise AssertionError("voices() must not hit the network")
-
-    client = _make_client(handler)
-    result = await client.voices()
-
-    assert result == list(BUILTIN_VOICES)
-
-
 async def test_health_true_on_200():
     def handler(request: httpx.Request) -> httpx.Response:
         assert request.url.path == "/health"

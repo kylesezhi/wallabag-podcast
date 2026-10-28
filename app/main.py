@@ -42,7 +42,7 @@ from .db import (
     reset_failed_to_staged,
     set_setting,
 )
-from .tts import TTSClient
+from .tts import BUILTIN_VOICES, TTSClient
 from .logging_setup import configure_logging
 from .pipeline import (
     add_article,
@@ -378,24 +378,14 @@ async def settings_page(
         logger.exception("Wallabag connection test failed")
         wallabag_ok = False
 
-    # Voice choices come from the TTS client's built-in list (static for the
-    # Pocket TTS engine); fall back to the configured default. The try/except
-    # shape is kept defensively even though the static list cannot fail.
-    tts_error: str | None = None
-    try:
-        voices = await app.state.tts_client.voices()
-    except Exception as exc:
-        logger.warning("Could not load TTS voices: %s", exc)
-        voices = []
-        tts_error = str(exc)
-    if not voices:
-        default_id = get_settings().TTS_DEFAULT_VOICE
-        voices = [{"id": default_id, "label": default_id}]
+    # TTS server status (health() never raises — connect failures are
+    # simply "unreachable"). Voice choices are the static built-in list.
+    tts_ok = bool(await app.state.tts_client.health())
 
     conn = connect()
     try:
         articles_per_drive = get_setting(conn, "articles_per_drive") or "10"
-        voice = get_setting(conn, "voice") or voices[0]["id"]
+        voice = get_setting(conn, "voice") or get_settings().TTS_DEFAULT_VOICE
         automation_time = get_setting(conn, "automation_time") or "07:00"
     finally:
         conn.close()
@@ -409,8 +399,8 @@ async def settings_page(
             "error": error,
             "wallabag_ok": wallabag_ok,
             "wallabag_url": settings.WALLABAG_URL,
-            "tts_error": tts_error,
-            "voices": voices,
+            "tts_ok": tts_ok,
+            "voices": BUILTIN_VOICES,
             "articles_per_drive": articles_per_drive,
             "voice": voice,
             "automation_time": automation_time,
@@ -644,6 +634,8 @@ async def settings_save(request: Request):
         )
     if error is None and not voice:
         error = "Voice must not be empty"
+    if error is None and voice not in {v["id"] for v in BUILTIN_VOICES}:
+        error = "Unknown voice — pick one from the list"
 
     # The autosave UI posts via fetch and consumes JSON; plain form posts
     # (no-JS fallback) still get the classic redirect + flash behavior.

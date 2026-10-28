@@ -162,7 +162,9 @@ def test_init_db_fresh_start_wipes_legacy_data(tmp_path, monkeypatch):
 
 def test_init_db_upgrade_from_pre_multipod_schema(tmp_path, monkeypatch):
     """A current-release pre-multi-podcast DB (progress columns, no podcast_id)
-    is wiped on upgrade while existing user settings survive the reseed."""
+    is wiped on upgrade while user-tuned articles_per_drive and automation
+    settings survive the reseed; a stale engine voice is reset to the Pocket
+    TTS default."""
     _set_required_env(monkeypatch)
     db_path = tmp_path / "podcast.db"
     audio_dir = tmp_path / "audio"
@@ -252,7 +254,9 @@ def test_init_db_upgrade_from_pre_multipod_schema(tmp_path, monkeypatch):
         assert re.fullmatch(r"[0-9a-f]{8}", podcasts[0][0])
         settings = dict(conn.execute("SELECT key, value FROM settings"))
         assert settings["articles_per_drive"] == "7"
-        assert settings["voice"] == "bm_daniel"
+        # A stale old-engine voice id is reset to the Pocket TTS default;
+        # the other seeded tunables survive the reseed untouched.
+        assert settings["voice"] == Settings().TTS_DEFAULT_VOICE
         assert settings["automation_enabled"] == "0"
         assert settings["automation_time"] == "07:00"
 

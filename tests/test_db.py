@@ -1,5 +1,6 @@
 """Tests for the podcast repository functions and per-podcast scoping."""
 
+import logging
 import re
 import sqlite3
 
@@ -52,6 +53,186 @@ def db(tmp_path, monkeypatch):
 def conn(db):
     with sqlite3.connect(get_db_path()) as connection:
         yield connection
+
+
+def _stored_voice() -> str:
+    conn = sqlite3.connect(get_db_path())
+    try:
+        row = conn.execute("SELECT value FROM settings WHERE key='voice'").fetchone()
+    finally:
+        conn.close()
+    return row[0] if row else ""
+
+
+def _stored_voice_row() -> tuple | None:
+    """The full voice settings row (value, updated_at), or None if absent."""
+    conn = sqlite3.connect(get_db_path())
+    try:
+        return conn.execute(
+            "SELECT value, updated_at FROM settings WHERE key='voice'"
+        ).fetchone()
+    finally:
+        conn.close()
+
+
+def _reinit_with_stored_voice(voice: str | None) -> None:
+    """Set (or delete) the voice row, then run init_db again over the DB.
+
+    init_db is idempotent, so re-running it against an existing schema is
+    exactly the "next boot" path the migration takes.
+    """
+    with sqlite3.connect(get_db_path()) as conn:
+        if voice is None:
+            conn.execute("DELETE FROM settings WHERE key='voice'")
+        else:
+            conn.execute(
+                "INSERT INTO settings (key, value, updated_at) VALUES "
+                "('voice', ?, '2026-01-01T00:00:00+00:00') "
+                "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+                (voice,),
+            )
+        conn.commit()
+    init_db(get_db_path())
+
+
+def _stamp_voice_row(value: str | None, updated_at: str = "old") -> None:
+    """Overwrite the voice row with the given value and a pinned stamp."""
+    with sqlite3.connect(get_db_path()) as conn:
+        conn.execute(
+            "UPDATE settings SET value=?, updated_at=? WHERE key='voice'",
+            (value, updated_at),
+        )
+        conn.commit()
+
+
+def _migration_warnings(caplog) -> list[str]:
+    return [
+        r.getMessage()
+        for r in caplog.records
+        if r.levelno == logging.WARNING and r.name == "app.db"
+    ]
+
+
+def test_init_db_migrates_stale_engine_voice(db, caplog):
+    """Voice ids from the previous TTS engine are reset to the default.
+
+    ``bm_daniel``/``af_heart`` are old-engine ids (arbitrary strings as far
+    as the migration is concerned): any stored value outside BUILTIN_VOICES
+    gets reset to TTS_DEFAULT_VOICE on boot — with a warning naming both the
+    stale value and the replacement, and the row's ``updated_at`` rewritten.
+
+    The rewrite is observed, not assumed: each stale row is first pinned to
+    a known old timestamp via :func:`_stamp_voice_row` (the seeding upsert
+    only sets ``value`` on conflict, which would leave the fixture's stamp
+    in place and make a timestamp check vacuous).
+    """
+    pinned_stamp = "2026-01-01T00:00:00+00:00"
+    with caplog.at_level(logging.WARNING, logger="app.db"):
+        for stale in ("bm_daniel", "af_heart"):
+            _reinit_with_stored_voice(stale)
+            # Pin BOTH columns to known-old values so any migration rewrite
+            # is observable.
+            _stamp_voice_row(stale, pinned_stamp)
+            assert _stored_voice_row() == (stale, pinned_stamp)  # pre-state
+            init_db(get_db_path())
+            # (a) the value is reset, (b) the timestamp is rewritten away
+            # from the pin — both observed, not assumed.
+            assert _stored_voice_row()[0] == get_settings().TTS_DEFAULT_VOICE
+            assert _stored_voice_row()[1] != pinned_stamp
+            warnings = _migration_warnings(caplog)
+            assert warnings, "resetting a stale voice must log a warning"
+            assert stale in warnings[-1]
+            assert get_settings().TTS_DEFAULT_VOICE in warnings[-1]
+            caplog.clear()
+
+
+def test_init_db_leaves_blank_voice_rows_alone(db, caplog):
+    """An empty or NULL voice row is NOT "invalid" and is left as-is.
+
+    Blank rows mean "unset": the settings page and ``_resolve_voice`` fall
+    back to TTS_DEFAULT_VOICE on read, so the migration must not rewrite
+    them — neither the value nor ``updated_at`` — and must not warn.
+    """
+    with caplog.at_level(logging.WARNING, logger="app.db"):
+        # Re-insert the row with an empty value (delete + INSERT to allow
+        # the NULL case explicitly).
+        conn = sqlite3.connect(get_db_path())
+        conn.execute("DELETE FROM settings WHERE key='voice'")
+        conn.execute(
+            "INSERT INTO settings (key, value, updated_at) VALUES "
+            "('voice', '', 'old-stamp')"
+        )
+        conn.commit()
+        conn.close()
+        init_db(get_db_path())
+        row = _stored_voice_row()
+        assert row == ("", "old-stamp")  # value and stamp untouched
+        assert _migration_warnings(caplog) == []
+
+        conn = sqlite3.connect(get_db_path())
+        conn.execute("DELETE FROM settings WHERE key='voice'")
+        conn.execute(
+            "INSERT INTO settings (key, value, updated_at) VALUES "
+            "('voice', NULL, 'old-stamp')"
+        )
+        conn.commit()
+        conn.close()
+        init_db(get_db_path())
+        row = _stored_voice_row()
+        assert row == (None, "old-stamp")  # NULL survives verbatim too
+        assert _migration_warnings(caplog) == []
+
+
+def test_init_db_fresh_boot_seeds_default_voice_without_warning(db, caplog, tmp_path):
+    """A fresh init_db seeds TTS_DEFAULT_VOICE and emits no migration warning.
+
+    init_db runs INSIDE the capture against a separate brand-new database
+    path, so the empty warning log describes the fresh boot itself — not an
+    idle capture. (What this does not show: whether seeding or migrating
+    produced the value — only that a fresh boot ends in the default voice
+    with no rewrite warning.)
+    """
+    fresh_path = tmp_path / "fresh.db"
+    with caplog.at_level(logging.WARNING, logger="app.db"):
+        init_db(fresh_path)
+        conn = sqlite3.connect(fresh_path)
+        try:
+            row = conn.execute(
+                "SELECT value, updated_at FROM settings WHERE key='voice'"
+            ).fetchone()
+        finally:
+            conn.close()
+        assert row is not None
+        assert row[0] == get_settings().TTS_DEFAULT_VOICE
+        assert row[1]  # updated_at populated by the seeding
+        assert _migration_warnings(caplog) == []
+
+
+def test_init_db_preserves_valid_stored_voice(db, caplog):
+    """A valid built-in id is never touched by the migration."""
+    with caplog.at_level(logging.WARNING, logger="app.db"):
+        _reinit_with_stored_voice("marius")
+        assert _stored_voice() == "marius"
+        assert _migration_warnings(caplog) == []
+        # Idempotent: a second init leaves the valid value alone.
+        init_db(get_db_path())
+        assert _stored_voice() == "marius"
+        assert _migration_warnings(caplog) == []
+
+
+def test_init_db_migration_is_idempotent(db):
+    """Resetting a stale voice is a one-time rewrite on later boots too."""
+    _reinit_with_stored_voice("bm_daniel")
+    assert _stored_voice() == get_settings().TTS_DEFAULT_VOICE
+    # Second boot: the corrected value is valid now, so it stays.
+    init_db(get_db_path())
+    assert _stored_voice() == get_settings().TTS_DEFAULT_VOICE
+
+
+def test_init_db_missing_voice_row_is_seeded(db):
+    """A deleted voice row falls back to the INSERT OR IGNORE seeding."""
+    _reinit_with_stored_voice(None)
+    assert _stored_voice() == get_settings().TTS_DEFAULT_VOICE
 
 
 def _podcast_id(conn, podcast: dict) -> int:

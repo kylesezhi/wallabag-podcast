@@ -15,6 +15,7 @@ from pathlib import Path
 
 from .config import get_settings
 from .naming import generate_name
+from .tts import BUILTIN_VOICES
 
 logger = logging.getLogger(__name__)
 
@@ -146,6 +147,26 @@ def init_db(db_path: Path | None = None) -> None:
                 "INSERT OR IGNORE INTO settings (key, value, updated_at) VALUES (?, ?, ?)",
                 (key, value, now),
             )
+
+        # Stale-voice migration: pre-Pocket-TTS databases hold the previous
+        # TTS engine's voice ids (``bm_daniel``, ``af_heart``), which Pocket
+        # TTS would reject with a 400 at generation time. Reset such a
+        # stored voice to TTS_DEFAULT_VOICE. This runs on every boot but
+        # only rewrites when the stored value is invalid — a valid built-in
+        # id (or a missing row, seeded above) is never touched.
+        row = conn.execute("SELECT value FROM settings WHERE key='voice'").fetchone()
+        if row is not None and row[0]:
+            stored_voice = str(row[0])
+            if stored_voice not in {v["id"] for v in BUILTIN_VOICES}:
+                conn.execute(
+                    "UPDATE settings SET value=?, updated_at=? WHERE key='voice'",
+                    (settings.TTS_DEFAULT_VOICE, _now_iso()),
+                )
+                logger.warning(
+                    "Reset stored voice '%s' (not a Pocket TTS built-in) to '%s'",
+                    stored_voice,
+                    settings.TTS_DEFAULT_VOICE,
+                )
 
 
 def _wipe_audio_files(audio_dir: Path) -> int:

@@ -28,7 +28,23 @@
 
   <form method="post" action="/settings" class="settings-form">
     <section class="card settings-section">
-      <h2 class="section-heading">Generation Settings</h2>
+      <div class="settings-head">
+        <h2 class="section-heading">Generation Settings</h2>
+        <p class="connection-status">
+          <span class="connection-status-label">TTS server:</span>
+          {% if tts_ok %}
+          <span class="status-badge status-badge-done">reachable</span>
+          {% else %}
+          <span class="status-badge status-badge-failed">unreachable</span>
+          {% endif %}
+        </p>
+      </div>
+      {% if not tts_ok %}
+      <p class="section-hint">
+        The TTS server is unreachable — start Pocket TTS with
+        <code>pocket-tts serve</code> (it must be running for generation).
+      </p>
+      {% endif %}
 
       <div class="field">
         <label for="articles_per_drive">Articles per drive</label>
@@ -49,9 +65,6 @@
           <option value="{{ v.id }}" {% if v.id == voice %}selected{% endif %}>{{ v.label }}</option>
           {% endfor %}
         </select>
-        {% if tts_error %}
-        <p class="section-hint">TTS voices unavailable: {{ tts_error }}</p>
-        {% endif %}
       </div>
     </section>
 
