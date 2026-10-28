@@ -1,3 +1,4 @@
+- https://kyutai.org/blog/2026-01-13-pocket-tts/
 - start with 2-minute summary
 - add chapters to xml based on article headings
 - generate multiple podcasts
