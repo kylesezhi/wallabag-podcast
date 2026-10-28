@@ -1,14 +1,16 @@
 """HTML-to-speech text cleaning pipeline (regex + BeautifulSoup only).
 
 Turns Wallabag's raw HTML article content into clean, spoken-word prose for
-Kokoro TTS. No LLM, no network. The pipeline:
+the TTS engine. No LLM, no network. The pipeline:
 
 1. Parse HTML with BeautifulSoup4 + lxml.
 2. Remove non-content elements (script/style/nav/footer/img/form/table/...).
 3. Replace section titles — h1-h6 headings and paragraphs whose entire text
    is bold (``<p><strong>Title</strong></p>``) — with
-   ``[pause:1s] Title. [pause:1s]`` tokens that Kokoro-FastAPI interprets
-   natively. The ``*_with_sections`` variants additionally prefix each token
+   ``[pause:1s] Title. [pause:1s]`` tokens. These tokens are app-side pause
+   directives consumed by the generation pipeline: the TTS client strips them
+   from the text before it is sent to the TTS server. The ``*_with_sections``
+   variants additionally prefix each token
    with a private-use sentinel (``_SECTION_MARK``) and return the title
    strings in document order, so the pipeline can align every title to a
    synthesis chunk and stamp ID3 chapter markers.
@@ -19,7 +21,7 @@ Kokoro TTS. No LLM, no network. The pipeline:
    rewriting ``Settings.PRONUNCIATIONS`` whole-word matches first.
 
 ``split_tts_text`` additionally splits a finished TTS input into sentence-boundary
-chunks (max ``Settings.KOKORO_MAX_CHUNK_CHARS`` chars) so the generation pipeline
+chunks (max ``Settings.TTS_MAX_CHUNK_CHARS`` chars) so the generation pipeline
 can synthesize long articles one bounded request at a time; sentences carrying a
 section-title sentinel always begin a new chunk so chapter starts are exact.
 
@@ -73,9 +75,10 @@ _WS_RE = re.compile(r"\s+")
 _SPACE_BEFORE_PUNCT_RE = re.compile(r"\s+([.!?,;:])")
 
 # Section titles: heading elements wrapped in pause tokens before flattening.
-# Kokoro-FastAPI interprets ``[pause:Xs]`` markers natively — the same tokens
-# already frame the article title in build_tts_input. Fixed durations, same
-# style as those hardcoded title/body pauses.
+# ``[pause:Xs]`` markers are app-side pause directives — the same tokens
+# already frame the article title in build_tts_input, and the TTS client
+# strips them from the text before it reaches the TTS server. Fixed
+# durations, same style as those hardcoded title/body pauses.
 _HEADING_PAUSE_BEFORE = "[pause:1s]"
 _HEADING_PAUSE_AFTER = "[pause:1s]"
 _HEADINGS = ("h1", "h2", "h3", "h4", "h5", "h6")
@@ -84,7 +87,8 @@ _HEADINGS = ("h1", "h2", "h3", "h4", "h5", "h6")
 # asks for chapter positions (``clean_body_with_sections`` /
 # ``build_tts_input_with_sections``). It survives every cleaning transform
 # untouched and marks exactly where a title starts in the flattened text, then
-# is stripped again before synthesis — it must never reach Kokoro. A regex over
+# is stripped again before synthesis — it must never reach the TTS server. A
+# regex over
 # the flattened text cannot locate titles reliably (the intro's trailing
 # ``[pause:1s]`` would false-match body text) and the raw heading string can
 # differ from the cleaned text (entities, URLs, pronunciation rewrites), so the
@@ -189,7 +193,7 @@ def _wrap_section_titles_with_pauses(
     bold (<p><strong>Title</strong></p>). Empty/whitespace-only titles are
     skipped; nested inline markup inside a title (<h2><em>Title</em></h2>)
     is flattened by get_text. Consecutive titles produce adjacent pause
-    pairs — Kokoro handles repeated tokens.
+    pairs — accepted by design, same as the repeated title/body tokens.
 
     When ``titles`` is given, each title's raw text is appended to it in
     document order and its token is prefixed with ``_SECTION_MARK`` so the
@@ -300,7 +304,7 @@ def strip_section_mark(text: str) -> str:
     """Remove every section-title sentinel so the text is TTS-safe.
 
     The sentinel is only a chapter-position marker; it must never reach the
-    Kokoro server.
+    TTS server.
     """
     return text.replace(_SECTION_MARK, "")
 
@@ -480,9 +484,9 @@ def split_tts_text(text: str, max_chars: int | None = None) -> list[str]:
     pipeline uses the cumulative duration of the preceding chunks as the
     chapter's start time. Joining the returned chunks with single spaces
     reconstructs the input text exactly. When ``max_chars`` is None the
-    default ``Settings.KOKORO_MAX_CHUNK_CHARS`` is used.
+    default ``Settings.TTS_MAX_CHUNK_CHARS`` is used.
     """
-    limit = get_settings().KOKORO_MAX_CHUNK_CHARS if max_chars is None else max_chars
+    limit = get_settings().TTS_MAX_CHUNK_CHARS if max_chars is None else max_chars
 
     text = text.strip()
     if not text:

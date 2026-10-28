@@ -868,7 +868,7 @@ def test_split_mixed_sentences_and_oversized():
 
 def test_split_uses_settings_default(monkeypatch):
     _set_required_env(monkeypatch)
-    monkeypatch.setenv("KOKORO_MAX_CHUNK_CHARS", "30")
+    monkeypatch.setenv("TTS_MAX_CHUNK_CHARS", "30")
     get_settings.cache_clear()
     try:
         text = "Aaaa bbbb cccc. Dddd eeee ffff."

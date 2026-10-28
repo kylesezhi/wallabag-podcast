@@ -49,8 +49,8 @@
           <option value="{{ v.id }}" {% if v.id == voice %}selected{% endif %}>{{ v.label }}</option>
           {% endfor %}
         </select>
-        {% if kokoro_error %}
-        <p class="section-hint">Kokoro voices unavailable: {{ kokoro_error }}</p>
+        {% if tts_error %}
+        <p class="section-hint">TTS voices unavailable: {{ tts_error }}</p>
         {% endif %}
       </div>
     </section>

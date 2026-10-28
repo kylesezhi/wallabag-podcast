@@ -62,8 +62,8 @@ def test_init_db_creates_tables_and_seeds_settings(tmp_path, monkeypatch):
         assert seeded["articles_per_drive"] == "10"
         assert seeded["automation_enabled"] == "0"
         assert seeded["automation_time"] == "07:00"
-        # voice seeded from KOKORO_DEFAULT_VOICE by default
-        assert seeded["voice"] == Settings().KOKORO_DEFAULT_VOICE
+        # voice seeded from TTS_DEFAULT_VOICE by default
+        assert seeded["voice"] == Settings().TTS_DEFAULT_VOICE
 
 
 def test_settings_parses_exclude_tags_and_required_secrets():
@@ -73,6 +73,29 @@ def test_settings_parses_exclude_tags_and_required_secrets():
         EXCLUDE_TAGS="computer, interactive, ",
     )
     assert settings.EXCLUDE_TAGS == ["computer", "interactive"]
+
+
+def test_settings_ignores_stale_engine_env_keys(monkeypatch):
+    """TRANSITIONAL extra="ignore": stale engine env keys don't crash startup.
+
+    Users' .env files may still carry the previous TTS engine's KOKORO_*
+    variables from before the Pocket TTS migration. With the shim removed
+    they would raise ValidationError on every Settings() construction; with
+    it they are dropped and the TTS_* defaults apply.
+
+    (This test names the KOKORO_* keys on purpose — it is the sanctioned
+    exception to the "zero kokoro references in app/ tests/ ..." grep rule;
+    production code must stay at zero hits.)
+    """
+    _set_required_env(monkeypatch)
+    monkeypatch.setenv("KOKORO_BASE_URL", "http://kokoro.example.test")
+    monkeypatch.setenv("KOKORO_DEFAULT_VOICE", "af_heart")
+
+    settings = Settings(_env_file=None)
+
+    # Instantiation succeeded and the engine-neutral defaults are intact.
+    assert settings.TTS_BASE_URL == "http://localhost:8880"
+    assert settings.TTS_DEFAULT_VOICE == "charles"
 
 
 def test_init_db_fresh_start_wipes_legacy_data(tmp_path, monkeypatch):

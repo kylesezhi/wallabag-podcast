@@ -12,11 +12,12 @@
 - ``delete_podcast`` removes a podcast's rows, dedupe entries, and audio files.
 - ``generate_all()`` produces one MP3 per staged episode: fetch the full
   Wallabag entry, clean the HTML into TTS input, split it into bounded chunks
-  (``Settings.KOKORO_MAX_CHUNK_CHARS``), synthesize each chunk with Kokoro and
-  append the bytes straight to ``DATA_DIR/audio/{id}.mp3.part`` (constant RAM;
-  chunk progress is persisted for the UI), atomically rename the finished part
-  file to ``{id}.mp3``, record the summed per-chunk duration, and mark the
-  episode ``done`` (recording a processed_articles row). When the article has
+  (``Settings.TTS_MAX_CHUNK_CHARS``), synthesize each chunk with the TTS
+  server and append the bytes straight to ``DATA_DIR/audio/{id}.mp3.part``
+  (constant RAM; chunk progress is persisted for the UI), atomically rename
+  the finished part file to ``{id}.mp3``, record the summed per-chunk
+  duration, and mark the episode ``done`` (recording a processed_articles row).
+  When the article has
   section titles, ID3v2 chapter markers are embedded into the finished MP3 —
   an intro chapter at 0:00 titled by the episode, then one chapter per section
   title timed from the cumulative per-chunk durations. Failures are isolated
@@ -61,8 +62,8 @@ from .db import (
     set_episode_generating,
     set_episode_progress,
 )
-from .kokoro import KokoroClient, KokoroError, measure_duration_seconds
-from .kokoro import measure_duration as _measure_asset_duration
+from .tts import TTSClient, TTSError, measure_duration_seconds
+from .tts import measure_duration as _measure_asset_duration
 from .textclean import (
     SkipArticle,
     build_tts_input_from_article_with_sections,
@@ -366,13 +367,13 @@ def delete_podcast(podcast_id: int) -> dict:
 def _resolve_voice(conn: sqlite3.Connection, settings: Settings) -> str:
     """Return the UI-tunable voice from the ``settings`` table.
 
-    Falls back to ``settings.KOKORO_DEFAULT_VOICE`` when the row is missing
+    Falls back to ``settings.TTS_DEFAULT_VOICE`` when the row is missing
     or empty.
     """
     row = conn.execute("SELECT value FROM settings WHERE key='voice'").fetchone()
     if row is not None and row[0]:
         return str(row[0])
-    return settings.KOKORO_DEFAULT_VOICE
+    return settings.TTS_DEFAULT_VOICE
 
 
 def _progress_suffix(conn: sqlite3.Connection, episode_id: int) -> str:
@@ -391,9 +392,9 @@ def _progress_suffix(conn: sqlite3.Connection, episode_id: int) -> str:
 
 
 async def _synthesize_with_retry(
-    kokoro_client: KokoroClient, text: str, voice: str
+    tts_client: TTSClient, text: str, voice: str
 ) -> bytes:
-    """Synthesize one chunk, retrying once on ``KokoroError``.
+    """Synthesize one chunk, retrying once on ``TTSError``.
 
     Connection failures and server errors are often transient; a single retry
     keeps one blip from failing an otherwise long synthesis. A second failure
@@ -401,10 +402,10 @@ async def _synthesize_with_retry(
     a BaseException), so user stops stay immediate.
     """
     try:
-        return await kokoro_client.synthesize(text, voice=voice)
-    except KokoroError:
+        return await tts_client.synthesize(text, voice=voice)
+    except TTSError:
         logger.warning("Chunk synthesis failed once; retrying")
-        return await kokoro_client.synthesize(text, voice=voice)
+        return await tts_client.synthesize(text, voice=voice)
 
 
 @lru_cache(maxsize=1)
@@ -412,12 +413,16 @@ def _gap_silence() -> tuple[bytes, int] | None:
     """Load the packaged end-of-episode silence asset.
 
     Returns ``(mp3_bytes, measured_seconds)`` for ``app/assets/gap_1s.mp3`` —
-    one second of silence encoded to match Kokoro's mp3 output (24 kHz mono,
-    128 kbps) so appended playback is seamless — or None when the asset is
-    missing or unparseable, so generation proceeds without the pause instead
-    of failing. Duration is measured directly via mutagen rather than the
-    ``measure_duration`` indirection so test patches of chunk measurement
-    cannot skew the gap's contribution.
+    one second of silence at the same sample rate and channel count as the
+    synthesized speech (24 kHz mono). TRANSITIONAL: the packaged asset is
+    128 kbps while speech MP3s are now CBR 64 kbps — mixed bitrates still
+    concatenate into valid MP3 (frames are self-describing), so appended
+    playback stays seamless, but the asset is scheduled for removal in the
+    next task, which switches the gap to ``encode_silence``. Returns None
+    when the asset is missing or unparseable, so generation proceeds without
+    the pause instead of failing. Duration is measured directly via mutagen
+    rather than the ``measure_duration`` indirection so test patches of chunk
+    measurement cannot skew the gap's contribution.
     """
     try:
         data = resources.files("app").joinpath("assets/gap_1s.mp3").read_bytes()
@@ -431,7 +436,7 @@ def _gap_silence() -> tuple[bytes, int] | None:
 
 async def _synthesize_chunks(
     conn: sqlite3.Connection,
-    kokoro_client: KokoroClient,
+    tts_client: TTSClient,
     episode_id: int,
     part_path: Path,
     chunks: list[str],
@@ -457,7 +462,7 @@ async def _synthesize_chunks(
     Chapter markers: when ``section_titles`` is given, each chunk whose text
     carries a section-title sentinel (``has_section_mark``) starts a chapter
     whose start time is the cumulative duration of all prior chunks; sentinels
-    are stripped from chunk text before every Kokoro call so they never reach
+    are stripped from chunk text before every TTS call so they never reach
     the TTS server. When at least one section chapter exists, an intro chapter
     titled ``intro_title`` is prepended at 0:00. Chapters are embedded into the
     renamed file via :func:`write_id3_chapters` — skipped when the total
@@ -477,7 +482,7 @@ async def _synthesize_chunks(
                 chapters.append((start_ms, section_titles[title_index]))
                 title_index += 1
             audio_bytes = await _synthesize_with_retry(
-                kokoro_client, strip_section_mark(chunk), voice
+                tts_client, strip_section_mark(chunk), voice
             )
             if total is not None:
                 chunk_duration = measure_duration_seconds(audio_bytes)
@@ -511,7 +516,7 @@ async def _synthesize_chunks(
 
 async def generate_all(
     wallabag_client: WallabagClient,
-    kokoro_client: KokoroClient,
+    tts_client: TTSClient,
     settings: Settings | None = None,
     podcast_id: int | None = None,
 ) -> dict:
@@ -522,7 +527,7 @@ async def generate_all(
     or global — draws one global drive_id and behaves identically.
 
     Each episode's TTS text is split into bounded chunks
-    (``Settings.KOKORO_MAX_CHUNK_CHARS``) that are synthesized sequentially and
+    (``Settings.TTS_MAX_CHUNK_CHARS``) that are synthesized sequentially and
     appended to ``{id}.mp3.part``; chunk progress (done/total) is persisted so
     the UI can poll it, and the finished part file is atomically renamed to the
     final MP3. ``Settings.EPISODE_GAP_SECONDS`` of trailing silence is appended
@@ -537,7 +542,7 @@ async def generate_all(
     ``failed`` ("Cancelled by user"), the remaining staged episodes stay
     ``staged``, and the partial summary is returned normally (the exception is
     not re-raised). Failures record a short reason in ``episodes.error``
-    (Kokoro/Wallabag → ``str(exc)``; unexpected →
+    (TTS/Wallabag → ``str(exc)``; unexpected →
     ``"Unexpected: <ExcType>: <msg>"``) while the full traceback goes to the
     log file; the chunk position reached is annotated in the failure log.
     An episode deleted from the queue mid-run (while still staged) is skipped
@@ -581,7 +586,7 @@ async def generate_all(
                 tts_text, section_titles = build_tts_input_from_article_with_sections(
                     article, min_chars=settings.MIN_TEXT_CHARS
                 )
-                chunks = split_tts_text(tts_text, settings.KOKORO_MAX_CHUNK_CHARS)
+                chunks = split_tts_text(tts_text, settings.TTS_MAX_CHUNK_CHARS)
                 logger.info(
                     "Generating episode %s (wallabag=%s, %d chunks)",
                     episode_id,
@@ -593,7 +598,7 @@ async def generate_all(
                 try:
                     final_path, duration = await _synthesize_chunks(
                         conn,
-                        kokoro_client,
+                        tts_client,
                         episode_id,
                         part_path,
                         chunks,
@@ -649,7 +654,7 @@ async def generate_all(
                     _progress_suffix(conn, episode_id),
                 )
                 set_episode_failed(conn, episode_id, f"Skipped: {exc}")
-            except (KokoroError, WallabagError) as exc:
+            except (TTSError, WallabagError) as exc:
                 # Expected, user-facing failure: store the short message in the
                 # DB (shown in the queue UI) but log the full cause chain to the
                 # log file so failures are diagnosable.

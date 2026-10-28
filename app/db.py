@@ -66,11 +66,11 @@ CREATE TABLE IF NOT EXISTS processed_articles (
 """
 
 # Default tunables seeded into the `settings` table on first run.
-# `voice` defaults to KOKORO_DEFAULT_VOICE from Settings and can be overridden
-# at runtime via the settings UI.
+# `voice` is seeded from TTS_DEFAULT_VOICE at init time (see init_db, which
+# overrides the static value here) and can be changed via the settings UI.
 _DEFAULT_SETTINGS = (
     ("articles_per_drive", "10"),
-    ("voice", "af_heart"),
+    ("voice", "charles"),
     ("automation_enabled", "0"),
     ("automation_time", "07:00"),
 )
@@ -139,9 +139,9 @@ def init_db(db_path: Path | None = None) -> None:
         now = _now_iso()
         settings = get_settings()
         for key, value in _DEFAULT_SETTINGS:
-            # Seeded voice default follows KOKORO_DEFAULT_VOICE when available.
+            # Seeded voice default follows TTS_DEFAULT_VOICE when available.
             if key == "voice":
-                value = settings.KOKORO_DEFAULT_VOICE
+                value = settings.TTS_DEFAULT_VOICE
             conn.execute(
                 "INSERT OR IGNORE INTO settings (key, value, updated_at) VALUES (?, ?, ?)",
                 (key, value, now),

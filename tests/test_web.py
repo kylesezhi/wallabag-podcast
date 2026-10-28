@@ -4,7 +4,7 @@ The env fixture points DATA_DIR at tmp_path and initializes the DB schema,
 matching the pattern used in test_pipeline.py and test_rss.py. init_db
 auto-creates one podcast, so most tests insert their episodes scoped to that
 podcast (``_podcast()`` returns it) and drive the UI through its hub page.
-Routes that need external clients (Wallabag, Kokoro) use lightweight mock
+Routes that need external clients (Wallabag, TTS) use lightweight mock
 objects whose methods are async stubs; pipeline functions that run in the
 background are patched at the ``app.main`` import site.
 """
@@ -32,6 +32,7 @@ from app.db import (
 )
 from app.main import _human_duration, app
 from app.pipeline import delete_podcast
+from app.tts import BUILTIN_VOICES
 from app.wallabag import ArticleFull, ArticleMeta
 
 _REQUIRED_ENV = {
@@ -48,8 +49,8 @@ def env(tmp_path, monkeypatch):
     for key, value in _REQUIRED_ENV.items():
         monkeypatch.setenv(key, value)
     monkeypatch.setenv("DATA_DIR", str(tmp_path))
-    monkeypatch.setenv("KOKORO_BASE_URL", "http://kokoro.test")
-    monkeypatch.setenv("KOKORO_DEFAULT_VOICE", "af_heart")
+    monkeypatch.setenv("TTS_BASE_URL", "http://tts.test")
+    monkeypatch.setenv("TTS_DEFAULT_VOICE", "charles")
     monkeypatch.setenv("WALLABAG_URL", "https://wallabag.test")
     get_settings.cache_clear()
     init_db(get_db_path())
@@ -229,14 +230,16 @@ class _ArchiveSpyWallabag:
         pass
 
 
-class _MockKokoro:
-    """Minimal async mock matching KokoroClient's public surface."""
+class _MockTTS:
+    """Minimal async mock matching TTSClient's public surface."""
 
-    def __init__(self, voice_list: list[str] | None = None):
-        self._voices = voice_list or ["af_heart", "af_blossom"]
+    def __init__(self, voice_list: list[dict[str, str]] | None = None):
+        self._voices = (
+            voice_list if voice_list is not None else list(BUILTIN_VOICES)
+        )
 
-    async def voices(self) -> list[str]:
-        return self._voices
+    async def voices(self) -> list[dict[str, str]]:
+        return list(self._voices)
 
     async def aclose(self) -> None:
         pass
@@ -637,7 +640,7 @@ def test_home_generate_button_enabled_when_idle(client):
 
 def test_settings_page(client):
     app.state.wallabag_client = _MockWallabag(connected=True)
-    app.state.kokoro_client = _MockKokoro()
+    app.state.tts_client = _MockTTS()
 
     response = client.get("/settings")
 
@@ -654,7 +657,7 @@ def test_settings_page(client):
 
 def test_settings_page_wallabag_fail(client):
     app.state.wallabag_client = _MockWallabag(connected=False)
-    app.state.kokoro_client = _MockKokoro()
+    app.state.tts_client = _MockTTS()
 
     response = client.get("/settings")
 
@@ -662,22 +665,32 @@ def test_settings_page_wallabag_fail(client):
     assert "not connected" in response.text.lower()
 
 
-def test_settings_page_kokoro_unreachable(client):
-    class _BrokenKokoro:
+def test_settings_page_tts_voices_failure_falls_back_to_default(client):
+    """A raising TTS client must not break the settings page.
+
+    The route wraps ``voices()`` in try/except: on failure the dropdown
+    falls back to a single entry built from ``TTS_DEFAULT_VOICE`` and the
+    failure is surfaced as a notice.
+    """
+
+    class _BrokenTTS:
         async def voices(self):
-            raise Exception("unreachable")
+            raise RuntimeError("unreachable")
 
         async def aclose(self) -> None:
             pass
 
     app.state.wallabag_client = _MockWallabag(connected=True)
-    app.state.kokoro_client = _BrokenKokoro()
+    app.state.tts_client = _BrokenTTS()
 
     response = client.get("/settings")
 
     assert response.status_code == 200
+    # Fallback dropdown option carries the configured default voice id...
+    assert 'value="charles"' in response.text
+    # ...and the failure notice names the engine and the cause.
+    assert "TTS voices unavailable" in response.text
     assert "unreachable" in response.text
-    assert "af_heart" in response.text
 
 
 # ---------------------------------------------------------------------------
@@ -1051,7 +1064,7 @@ def test_generate_requires_staged_in_target_podcast(client, monkeypatch):
     assert response.status_code == 303
     assert "error" in response.headers["location"]
 
-    async def mock_generate_all(wallabag_client, kokoro_client, settings, podcast_id=None):
+    async def mock_generate_all(wallabag_client, tts_client, settings, podcast_id=None):
         return {"total": 1, "done": 1, "failed": 0, "skipped": 0}
 
     monkeypatch.setattr("app.main.generate_all", mock_generate_all)
@@ -1165,7 +1178,7 @@ def test_generate_starts(client, monkeypatch):
     with sqlite3.connect(get_db_path()) as conn:
         _insert_staged(conn, [(1, "Ready to Generate")], podcast_id=podcast["id"])
 
-    async def mock_generate_all(wallabag_client, kokoro_client, settings, podcast_id=None):
+    async def mock_generate_all(wallabag_client, tts_client, settings, podcast_id=None):
         return {"total": 1, "done": 1, "failed": 0, "skipped": 0}
 
     monkeypatch.setattr("app.main.generate_all", mock_generate_all)
@@ -1184,7 +1197,7 @@ def test_generate_already_running(client, monkeypatch):
     with sqlite3.connect(get_db_path()) as conn:
         _insert_staged(conn, [(1, "Ready to Generate")], podcast_id=podcast["id"])
 
-    async def mock_generate_all(wallabag_client, kokoro_client, settings, podcast_id=None):
+    async def mock_generate_all(wallabag_client, tts_client, settings, podcast_id=None):
         return {"total": 1, "done": 1, "failed": 0, "skipped": 0}
 
     monkeypatch.setattr("app.main.generate_all", mock_generate_all)
@@ -1215,7 +1228,7 @@ def test_generate_retries_failed_only_queue(client, monkeypatch):
     with sqlite3.connect(get_db_path()) as conn:
         _insert_failed(conn, 7, "Broken Article", podcast_id=podcast["id"])
 
-    async def mock_generate_all(wallabag_client, kokoro_client, settings, podcast_id=None):
+    async def mock_generate_all(wallabag_client, tts_client, settings, podcast_id=None):
         return {"total": 0, "done": 0, "failed": 0, "skipped": 0}
 
     monkeypatch.setattr("app.main.generate_all", mock_generate_all)
@@ -1241,7 +1254,7 @@ def test_generate_sweeps_failed_into_run(client, monkeypatch):
         _insert_staged(conn, [(1, "Fresh Article")], podcast_id=podcast["id"])
         _insert_failed(conn, 2, "Broken Article", podcast_id=podcast["id"])
 
-    async def mock_generate_all(wallabag_client, kokoro_client, settings, podcast_id=None):
+    async def mock_generate_all(wallabag_client, tts_client, settings, podcast_id=None):
         return {"total": 2, "done": 2, "failed": 0, "skipped": 0}
 
     monkeypatch.setattr("app.main.generate_all", mock_generate_all)
@@ -1333,7 +1346,7 @@ def test_stop_active_run(client, monkeypatch):
     started = asyncio.Event()
     release = asyncio.Event()
 
-    async def mock_generate_all(wallabag_client, kokoro_client, settings, podcast_id=None):
+    async def mock_generate_all(wallabag_client, tts_client, settings, podcast_id=None):
         started.set()
         try:
             await release.wait()
@@ -2063,8 +2076,8 @@ class _JourneyWallabag:
         pass
 
 
-class _JourneyKokoro:
-    """Fake kokoro client returning unparseable bytes (duration fallback)."""
+class _JourneyTTS:
+    """Fake TTS client returning unparseable bytes (duration fallback)."""
 
     async def synthesize(self, text: str, voice: str | None = None) -> bytes:
         return b"FAKE_MP3_BYTES"
@@ -2096,7 +2109,7 @@ def test_podcast_journey_create_generate_delete(client, env):
     other = next(p for p in podcasts if p["guid"] != guid)
 
     app.state.wallabag_client = _JourneyWallabag(_journey_articles())
-    app.state.kokoro_client = _JourneyKokoro()
+    app.state.tts_client = _JourneyTTS()
 
     response = client.post(
         f"/podcast/{guid}/queue/add-random", follow_redirects=False

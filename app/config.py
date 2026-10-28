@@ -46,7 +46,16 @@ def _split_pronunciations(value: object) -> object:
 class Settings(BaseSettings):
     """All environment variables for the app (see docs/specs/config-and-env.md)."""
 
-    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        env_file_encoding="utf-8",
+        # TRANSITIONAL: ignore unknown env keys so a pre-migration .env
+        # (which may still list the previous TTS engine's settings) keeps the
+        # app bootable; stale values are dropped and the TTS_* defaults
+        # apply. Revisit once users have migrated their .env files (the
+        # rename is documented in Task 4).
+        extra="ignore",
+    )
 
     # --- Wallabag (OAuth password grant) ---
     WALLABAG_URL: str = "https://app.wallabag.it"
@@ -55,14 +64,12 @@ class Settings(BaseSettings):
     WALLABAG_USERNAME: str
     WALLABAG_PASSWORD: str
 
-    # --- Kokoro-FastAPI ---
-    KOKORO_BASE_URL: str = "http://localhost:8880"
-    KOKORO_DEFAULT_VOICE: str = "af_heart"
-    KOKORO_SPEED: float = 1.0
-    KOKORO_RESPONSE_FORMAT: str = "mp3"
+    # --- Pocket TTS (serve) ---
+    TTS_BASE_URL: str = "http://localhost:8880"
+    TTS_DEFAULT_VOICE: str = "charles"
     # Max characters per TTS request; long articles are split into chunks that
     # are synthesized one at a time and appended to disk (bounded RAM).
-    KOKORO_MAX_CHUNK_CHARS: int = 2000
+    TTS_MAX_CHUNK_CHARS: int = 2000
 
     # --- App ---
     BASE_URL: str = "http://localhost:8000"
@@ -77,8 +84,8 @@ class Settings(BaseSettings):
     # Seconds of trailing silence appended to each finished episode so
     # back-to-back playback has an audible boundary between articles.
     # Rendered by repeating the packaged 1-second silent MP3
-    # (app/assets/gap_1s.mp3, encoded in Kokoro's mp3 format); fractional
-    # values floor to whole seconds, 0 disables the pause.
+    # (app/assets/gap_1s.mp3, 24 kHz mono MP3); fractional values floor to
+    # whole seconds, 0 disables the pause.
     EPISODE_GAP_SECONDS: float = 3.0
     FEED_TITLE: str = "Kyle's Morning Podcast"
     # Verbosity for the app + uvicorn loggers (root level). DEBUG/INFO/WARNING/ERROR.

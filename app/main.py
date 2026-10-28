@@ -1,7 +1,7 @@
 """FastAPI application entry point.
 
 Lifespan initializes the SQLite database, the audio directory, and shared
-Wallabag/Kokoro clients (stored on ``app.state`` so tests can swap in mocks).
+Wallabag/TTS clients (stored on ``app.state`` so tests can swap in mocks).
 Serves the multi-podcast hub (one page per podcast, indexed by GUID), the
 scoped queue action routes, a JSON polling endpoint used during generation,
 and one RSS feed per podcast at ``/podcast/{guid}/feed.xml``.
@@ -42,7 +42,7 @@ from .db import (
     reset_failed_to_staged,
     set_setting,
 )
-from .kokoro import KokoroClient
+from .tts import TTSClient
 from .logging_setup import configure_logging
 from .pipeline import (
     add_article,
@@ -121,7 +121,7 @@ async def lifespan(app: FastAPI):
 
     # Shared clients, stored on app.state so tests can replace them with mocks.
     app.state.wallabag_client = WallabagClient(settings)
-    app.state.kokoro_client = KokoroClient(settings)
+    app.state.tts_client = TTSClient(settings)
     app.state.generating = False
     app.state.generating_podcast_id = None
     app.state.generation_task = None
@@ -138,7 +138,7 @@ async def lifespan(app: FastAPI):
             except asyncio.CancelledError:
                 pass
         await app.state.wallabag_client.aclose()
-        await app.state.kokoro_client.aclose()
+        await app.state.tts_client.aclose()
 
 
 app = FastAPI(title="wallabag-podcast", lifespan=lifespan)
@@ -233,7 +233,7 @@ async def _run_generation(app: FastAPI, podcast_id: int | None) -> None:
     try:
         summary = await generate_all(
             app.state.wallabag_client,
-            app.state.kokoro_client,
+            app.state.tts_client,
             get_settings(),
             podcast_id=podcast_id,
         )
@@ -378,16 +378,18 @@ async def settings_page(
         logger.exception("Wallabag connection test failed")
         wallabag_ok = False
 
-    # Voice choices come live from Kokoro; fall back to the configured default.
-    kokoro_error: str | None = None
+    # Voice choices come from the TTS client's built-in list (static for the
+    # Pocket TTS engine); fall back to the configured default. The try/except
+    # shape is kept defensively even though the static list cannot fail.
+    tts_error: str | None = None
     try:
-        voices = await app.state.kokoro_client.voices()
+        voices = await app.state.tts_client.voices()
     except Exception as exc:
-        logger.warning("Could not fetch Kokoro voices: %s", exc)
+        logger.warning("Could not load TTS voices: %s", exc)
         voices = []
-        kokoro_error = str(exc)
+        tts_error = str(exc)
     if not voices:
-        default_id = get_settings().KOKORO_DEFAULT_VOICE
+        default_id = get_settings().TTS_DEFAULT_VOICE
         voices = [{"id": default_id, "label": default_id}]
 
     conn = connect()
@@ -407,7 +409,7 @@ async def settings_page(
             "error": error,
             "wallabag_ok": wallabag_ok,
             "wallabag_url": settings.WALLABAG_URL,
-            "kokoro_error": kokoro_error,
+            "tts_error": tts_error,
             "voices": voices,
             "articles_per_drive": articles_per_drive,
             "voice": voice,
