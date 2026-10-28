@@ -1,9 +1,6 @@
 - https://kyutai.org/blog/2026-01-13-pocket-tts/
 - start with 2-minute summary
-- add chapters to xml based on article headings
-- generate multiple podcasts
 - default voice setting for all episodes, but configurable on per ep basis before generation
-- add by wallabag entry number
 - reduce verbose comments in code
 - exclude articles with code blocks 
 - websocket connection instead of polling
