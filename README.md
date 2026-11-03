@@ -1,221 +1,51 @@
 # wallabag-podcast
 
-A single-user, self-hosted web app that turns your Wallabag saved articles
-into podcasts: create any number of randomly named podcasts, pull random
-unread articles into each podcast's editable queue, synthesize each one into
-an MP3 "episode" with Kokoro-FastAPI text-to-speech, and serve them through a
-per-podcast RSS feed you can subscribe to in any podcast app. An article never
-repeats — once picked or generated for one podcast, it is excluded from every
-podcast.
+Turn your Wallabag saved articles into podcasts. Create multiple randomly-named podcasts, queue random unread articles, generate MP3s with [Kokoro-FastAPI](https://github.com/remsky/Kokoro-FastAPI), and subscribe via per-podcast RSS feeds. Articles are never repeated across podcasts; Wallabag state is never modified.
 
-## What it does
+## Quick Start
 
-A podcast hub: the home page opens your newest podcast, header tabs switch
-between podcasts, and **New Podcast** adds another (randomly named). Each
-podcast is an independent feed with its own queue: fetch N random unread
-Wallabag articles → review and edit the queue (drop the ones you don't want) →
-generate one MP3 per article via Kokoro TTS → subscribe to that podcast's
-feed. Each episode is a spoken title intro followed by the article body. There
-is no scheduler in v1 — everything is manual, and the app never mutates your
-Wallabag state.
-
-## Prerequisites
-
-- **[mise](https://mise.jdx.dev/)** — pins and installs the project's Python and
-  uv (or use **Docker** for the containerized setup)
-- A **Wallabag** instance (self-hosted or https://app.wallabag.it) with API
-  credentials enabled — get `CLIENT_ID` / `CLIENT_SECRET` from your
-  instance's *Developer* / *API clients* settings page
-- **Kokoro-FastAPI** running locally (see below) so MP3s can be generated
-
-## Quick start (local dev)
-
+### Local dev
 ```bash
 uv sync
-cp .env.example .env        # then fill in your Wallabag credentials
-```
-
-Start Kokoro-FastAPI (the TTS engine) in a separate terminal:
-
-```bash
+cp .env.example .env  # fill in Wallabag credentials
+# Start TTS in another terminal
 docker run -p 8880:8880 ghcr.io/remsky/kokoro-fastapi-cpu:latest
+# Run app
+mise run start  # or: uv run uvicorn app.main:app --reload
 ```
+Open http://127.0.0.1:8000. First start creates a podcast automatically. Test Wallabag in **Settings** → **Test Connection**.
 
-Then run the app:
-
+### Docker
 ```bash
-mise run start              # or: uv run uvicorn app.main:app --reload
-```
-
-Open <http://127.0.0.1:8000> — you should see your podcast hub. First start
-creates one randomly named podcast automatically. Click **Settings** →
-**Test Connection** to verify Wallabag is reachable.
-
-## Docker setup
-
-```bash
-cp .env.example .env        # then fill in your Wallabag credentials
+cp .env.example .env
 docker compose up -d
 ```
+Opens at http://localhost:8000. Both app and Kokoro run in compose; audio/DB persist in `./data`. Set `BASE_URL` to your LAN IP for phone access.
 
-Open <http://localhost:8000>. Compose starts **both** the app and a
-Kokoro-FastAPI container, so no separate TTS step is needed. Inside the
-compose network the app reaches Kokoro via the service name `kokoro`, so
-`KOKORO_BASE_URL` is overridden to `http://kokoro:8880` (the `.env` default of
-`http://localhost:8880` only works for local dev). `HOST=0.0.0.0` is also
-overridden so the app is reachable outside its container. Generated audio and
-the SQLite database live in `./data` on the host (a bind mount), so they
-survive container rebuilds.
+## Configuration
 
-## Configuration (.env)
-
-Copy `.env.example` to `.env` and fill it in. All variables:
-
+Key variables in `.env`:
 | Variable | Description |
 | --- | --- |
-| `WALLABAG_URL` | Base URL of your Wallabag instance (default `https://app.wallabag.it`). |
-| `WALLABAG_CLIENT_ID` | OAuth client ID — create one in your Wallabag instance's *Developer* / *API clients* settings. |
-| `WALLABAG_CLIENT_SECRET` | OAuth client secret for the client above. |
-| `WALLABAG_USERNAME` | Your Wallabag username (OAuth password grant). |
-| `WALLABAG_PASSWORD` | Your Wallabag password (OAuth password grant). |
-| `KOKORO_BASE_URL` | Where Kokoro-FastAPI listens (default `http://localhost:8880`). |
-| `KOKORO_DEFAULT_VOICE` | Default TTS voice, e.g. `af_heart` (overridable in the Settings UI). |
-| `KOKORO_SPEED` | Speech rate multiplier passed to Kokoro (default `1.0`). |
-| `KOKORO_RESPONSE_FORMAT` | Audio format requested from Kokoro (default `mp3`). |
-| `BASE_URL` | **The most important setting for phone listening.** The address podcast apps use for audio/enclosure URLs. Use `http://localhost:8000` when listening on the same machine, or your computer's LAN IP (e.g. `http://192.168.1.50:8000`) to listen from your phone on the same network. |
-| `HOST` | Bind address for uvicorn (default `127.0.0.1`; use `0.0.0.0` to expose on the LAN). |
-| `PORT` | Port uvicorn listens on (default `8000`). |
-| `DATA_DIR` | Where the SQLite DB and generated `audio/*.mp3` live (default `./data`). |
-| `EXCLUDE_TAGS` | Comma-separated Wallabag tags to skip when picking random articles (e.g. `computer,interactive`). |
-| `MIN_TEXT_CHARS` | Minimum cleaned-text length for an article to be worth narrating; shorter articles are skipped (default `200`). |
-| `MAX_FETCH_PAGES` | Safety cap on pages fetched while enumerating unread candidates (default `50`). |
-| `FEED_TITLE` | App/brand title shown in the header, footer, and settings page (not an RSS title — each podcast feed is titled by its podcast name). |
+| `WALLABAG_URL`, `WALLABAG_CLIENT_ID`, `WALLABAG_CLIENT_SECRET`, `WALLABAG_USERNAME`, `WALLABAG_PASSWORD` | Wallabag OAuth credentials (never stored in DB/UI). |
+| `KOKORO_BASE_URL`, `KOKORO_DEFAULT_VOICE`, `KOKORO_SPEED` | TTS settings (default voice e.g. `af_heart`). |
+| `BASE_URL` | Feed/audio base URL for podcast apps (use LAN IP for phones). |
+| `HOST`/`PORT` | Bind address/port (`0.0.0.0` to expose on LAN). |
+| `DATA_DIR` | DB and audio location (default `./data`). |
+| `EXCLUDE_TAGS`, `MIN_TEXT_CHARS`, `MAX_FETCH_PAGES` | Filtering options. |
 
-Wallabag credentials are OAuth password-grant values — they never appear in
-the UI or the database, only in `.env`.
+## Usage
 
-## Using the app
+1. **Queue**: On a podcast page, **Add N Random Articles** (configurable in Settings) or paste a Wallabag URL/ID to add a specific article. Articles already queued/generated or in other podcasts aren't offered again.
+2. **Review**: **Delete** removes from queue (and deletes MP3 if generated; article stays unread). **Archive** marks article read in Wallabag but keeps episode in feed.
+3. **Generate**: **Generate Audio** synthesizes queued articles. Failed/cancelled episodes are retried automatically. Use **Stop Generating** to cancel a running job.
+4. **Subscribe**: Each podcast has its own feed at `{BASE_URL}/podcast/{guid}/feed.xml` (copy button). Add to any podcast app. Audio supports HTTP range requests for seeking.
 
-The home page opens the newest podcast. The header shows a tab per podcast
-(the active one is highlighted); **New Podcast** creates another randomly
-named podcast, and **Delete Podcast** on a podcast page removes that feed and
-all of its episodes. Each podcast is independent — its own queue, its own
-feed, its own subscription URL — and the article pool is shared: an article
-staged or generated for one podcast is never offered to another.
-
-1. On a podcast's page, click **Add N Random Articles** to stage N random
-   unread articles into that podcast (N is set under **Settings** → *Articles
-   per drive*, default 10). To stage one specific article instead, paste its
-   Wallabag view URL (e.g. `http://192.168.42.223:8000/view/2793`) or just the
-   entry ID into the field below and click **Add Article**. Explicit adds
-   ignore the exclude-tags filter and may target articles already marked read
-   in Wallabag; an article already staged in a podcast or generated before is
-   refused with a notice.
-2. Review the queue. Each episode has two buttons:
-   - **Delete** removes the episode from the podcast (deletes the queue row and,
-     for finished episodes, the MP3 file and dedupe record). The article stays
-     unread in Wallabag and can be re-picked by **Add N Random Articles**
-     later.
-   - **Archive** marks the article as read in Wallabag. The episode stays in the
-     podcast (MP3 and RSS entry untouched).
-3. Click **Generate Audio** — each article is fetched, cleaned, and
-   synthesized into an MP3. Progress updates live on the page as episodes flip
-   from `generating` to `done` (or `failed` with a reason).
-4. Failed episodes are retryable: the next time you click **Generate Audio**,
-   every `failed` episode is swept back into the run alongside newly staged
-   ones (including skipped short-text articles and cancelled episodes — a
-   deterministic skip just re-fails cheaply, without a TTS call). If nothing
-   is staged or failed, you'll see a "No staged articles to generate" notice.
-5. To stop a run in progress — e.g. if synthesis is hung — click **Stop
-   Generating** (shown in the progress card). The in-flight episode is marked
-   `failed` ("Cancelled by user") and the remaining queued episodes stay
-   `staged` so you can generate them later.
-6. When you're happy with the drive, click **Delete** on any finished episode
-   to remove it from the feed and delete its MP3 file — you'll get a quick
-   confirm prompt first since the audio is gone for good. **Clear Staged** drops
-   the staged/failed items without touching completed ones.
-7. An episode can get stuck in `generating` if the process is restarted
-   mid-run. Its **Delete** and **Archive** buttons always appear. Clicking
-   **Delete** on the in-flight episode during an active run stops the run first
-   — the episode flips to `failed` and you can delete it again — or use **Stop
-   Generating** directly. **Archive** on a generating episode just marks the
-   article read without affecting the generation loop.
-
-## Upgrading from the single-podcast version
-
-Booting this version against an existing data directory performs a one-time
-fresh start: episodes and generated audio are wiped, your settings are kept,
-and one randomly named podcast is created automatically. After that, deleting
-the last podcast is allowed — the app simply shows a "New Podcast" screen.
-
-## Subscribing in a podcast app
-
-Each podcast has its own feed URL, `{BASE_URL}/podcast/{guid}/feed.xml` (shown
-on that podcast's page with a copy button). Add it to any podcast app — Apple
-Podcasts, Podcast Addict, AntennaPod, etc. — as an RSS feed. The old global
-`{BASE_URL}/feed.xml` feed no longer exists.
-
-For phone listening on the same LAN, set `BASE_URL` to your computer's LAN IP
-(e.g. `http://192.168.1.50:8000`) and bind `HOST=0.0.0.0` (or use the Docker
-setup). There is no authentication on the feed or the UI — it's intended for
-local-network use only.
-
-## Cover art
-
-Each podcast gets its own cover: the podcast's name is rendered in white Pixel
-Operator 8 Bold (with a black outline) onto the shared 1254×1254 base artwork,
-drawn bottom-center. The base asset stays pristine at `static/cover.png`
-(also served at `{BASE_URL}/static/cover.png`) and is composited at request
-time; the per-podcast cover is served at `{BASE_URL}/podcast/{guid}/cover.png`
-and referenced by that podcast's feed via the iTunes image element at both the
-channel and episode level, plus the legacy RSS `<image>` element.
-
-Renders are cached in memory and re-created on first request after a restart.
-The Pixel Operator font is by Jayvee Enaguas (HarvettFox96), licensed CC0 1.0
-public domain; the font and its license are bundled under `app/assets/fonts/`.
-The image is 1254×1254, which is below Apple Podcasts' 1400px directory
-minimum, but it's valid RSS and fine for self-hosted LAN use.
-
-## Seeking / range support
-
-Audio is served with **HTTP 206 Partial Content** range support, so podcast
-apps can seek and scrub within episodes instead of re-downloading the whole
-file. Every audio response advertises `Accept-Ranges: bytes`; invalid or
-unsatisfiable ranges get a `416 Range Not Satisfiable`.
+**Notes:** Upgrading from single-podcast version wipes episodes/audio but keeps settings and creates a new podcast. No auth on UI/feed (LAN use only). Per-podcast covers auto-generated from `static/cover.png`.
 
 ## Development
-
 ```bash
-mise run test               # or: uv run pytest -q
+mise run test  # or: uv run pytest -q
 ```
 
-Project layout:
-
-```
-app/
-  main.py        # FastAPI app, routes, lifespan (hub, per-podcast feeds, scoped queue actions, audio)
-  config.py      # pydantic-settings Settings — secrets + defaults from .env
-  db.py          # SQLite connection, schema init, repository functions
-  naming.py      # weighted random podcast name generator (pure module)
-  wallabag.py    # WallabagClient: oauth, list metadata, get entry
-  kokoro.py      # KokoroClient: voices, synthesize -> mp3 bytes
-  textclean.py   # HTML -> clean spoken text + intro assembly
-  pipeline.py    # orchestration: queue ops, generate flow
-  rss.py         # build podcast feed from episodes
-templates/       # Jinja2: base, index (podcast hub: tabs, hero, episodes, other podcasts, subscription), settings
-static/          # css, js, images
-tests/           # pytest suite
-```
-
-## How it works
-
-FastAPI serves a server-rendered UI backed by a thin SQLite repository. The
-pipeline fetches unread article metadata from the **Wallabag API**, filters
-exclusions (tags, already-processed articles — the dedupe pool is global
-across podcasts), and stages random picks into the active podcast. During
-generation each staged episode's full entry is fetched, cleaned from HTML into
-spoken text, and sent to **Kokoro-FastAPI**, which returns an MP3 written to
-`DATA_DIR/audio/{id}.mp3`; duration is measured and the episode is marked
-done. Each **RSS feed** (built with feedgen) references those files at
-`{BASE_URL}/audio/{id}.mp3`, which the range-aware audio route serves. All
-queue/processed tracking is local to SQLite — Wallabag state is never mutated.
+See `app/` for code layout (FastAPI, SQLite, Wallabag/Kokoro clients, pipeline, RSS).
