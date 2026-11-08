@@ -1,0 +1,49 @@
+# Dockerfile.tts — Kyutai Pocket TTS server image (CPU-only torch).
+#
+# Why a custom image: Pocket TTS `serve` is CPU-only (it has no GPU mode),
+# but PyPI's default Linux torch wheel bundles ~3 GB of unused CUDA/nvidia
+# packages. The fix is the one upstream's README documents for Linux: install
+# torch from the PyTorch CPU index (~200 MB, no nvidia wheels) BEFORE the
+# package itself, so the resolver sees a satisfying torch already present and
+# never pulls the CUDA variant.
+#
+# Pin: pocket-tts==4.0.1 — the PyPI release matching upstream tag v4.0.1
+# (verified via https://pypi.org/pypi/pocket-tts/json, where 4.0.1 is the
+# latest release). Its torch-family requirement is exactly `torch>=2.5.0` —
+# no torchaudio/torchvision — so torch alone is all step 1 must pre-install.
+#
+# Cache paths: the image runs as root (python:3.12-slim default) and neither
+# this file nor upstream's Dockerfile sets any HF_HOME-style override, so
+# pocket-tts writes to its defaults — /root/.cache/pocket_tts and
+# /root/.cache/huggingface — exactly the volumes docker-compose.yml mounts.
+
+FROM python:3.12-slim
+
+# Install uv from the official image so no build toolchain is needed (same
+# convention as the app Dockerfile).
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
+
+# Dedicated venv so the TTS stack is isolated from the base interpreter.
+RUN uv venv /tts-venv
+ENV VIRTUAL_ENV=/tts-venv
+ENV PATH="/tts-venv/bin:$PATH"
+
+# Step 1: torch from the CPU index — pre-satisfies pocket-tts's
+# torch>=2.5.0 requirement so step 2 cannot pull the ~3 GB CUDA variant.
+RUN uv pip install --no-cache --index https://download.pytorch.org/whl/cpu torch
+
+# Step 2: the pinned Pocket TTS release (pulls its CUDA-free deps from PyPI).
+RUN uv pip install --no-cache pocket-tts==4.0.1
+
+# --no-cache is used instead of a BuildKit `RUN --mount=type=cache` because
+# it needs no buildkit syntax declaration and works with plain `docker
+# build`; the transient wheel downloads are per-build anyway and only the
+# model caches (mounted volumes) are worth persisting.
+
+EXPOSE 8880
+
+# Resolves through the venv PATH above. Serve flags: docker-compose.yml's
+# `command` is the source of truth for the compose deployment, and this CMD
+# deliberately mirrors it so the image also works standalone.
+ENTRYPOINT ["pocket-tts"]
+CMD ["serve", "--host", "0.0.0.0", "--port", "8880"]

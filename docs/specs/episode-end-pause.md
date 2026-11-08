@@ -12,16 +12,16 @@ Scope: feature
 
 ## Constraints
 
-- Silence comes from a static silent-MP3 asset checked into the repo (`app/assets/gap_1s.mp3`, ~1 second), encoded in the same format as Kokoro's mp3 output (matching sample rate, channels, bitrate) so concatenated playback is seamless.
-- No new runtime dependencies (no ffmpeg at runtime); the asset ships with the package.
-- Silence bytes are appended inside `_synthesize_chunks` **before** the atomic `os.replace(part → final)` rename: a failed or cancelled generation must never leave a partial file with only some of the gap.
-- Duration accounting: measured gap duration is added to the per-chunk mutagen sum in `_synthesize_chunks`; if chunk durations were already unparseable (`total = None`), behavior falls back to `est_minutes` as today.
+- Silence is generated in-process by the **same lameenc MP3 encoder as the speech** (`encode_silence` in app/tts.py, 64 kbps CBR, 24 kHz mono — homogeneous framing with synthesized audio, so concatenated playback is seamless). Results are cached per duration; one-second units are reused across chunks and for the gap.
+- No asset packaging or new runtime dependencies (no ffmpeg at runtime); the silence lives in code.
+- Silence bytes are appended inside `_synthesize_chunks` **before** the atomic `os.replace(part → final)` rename: a failed or cancelled generation must never leave a partial file with only some of the gap. The writes contain no awaits, so a cancellation cannot interrupt mid-gap.
+- Duration accounting: the measured gap duration is added to the measured silence/chunk sum in `_synthesize_chunks`; if that sum was already unparseable (`total = None`), behavior falls back to `est_minutes` as today.
 - Only newly generated episodes gain the pause; existing done episodes are unchanged unless regenerated.
 
 ## Acceptance Criteria
 
-1. A freshly generated `{id}.mp3` ends with exactly floor(`EPISODE_GAP_SECONDS`) copies of the silence asset appended after the last speech chunk.
-2. Episode duration stored via `set_episode_done` includes the appended gap.
-3. `EPISODE_GAP_SECONDS=0` produces byte-identical output to the pre-feature pipeline.
+1. A freshly generated `{id}.mp3` ends with exactly floor(`EPISODE_GAP_SECONDS`) one-second silences appended after the last chunk (0 copies when floored ≤ 0, including negative/unclamped values).
+2. Episode duration stored via `set_episode_done` includes the appended gap (measured, multiplied by the copy count).
+3. `EPISODE_GAP_SECONDS=0` produces the same output as a gap-free run (no gap bytes ever fetched).
 4. Cancellation/failure mid-run leaves no `.part` or final file containing a partially-appended gap.
-5. Test suite passes (`just test`), including new tests for trailing-silence presence, duration inclusion, and the disabled case.
+5. Test suite passes (`uv run pytest -q` / `mise run test`), including tests for trailing-silence presence, duration inclusion, and the disabled case.

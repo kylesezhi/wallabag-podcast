@@ -15,14 +15,16 @@ WALLABAG_USERNAME=...
 WALLABAG_PASSWORD=...
 ```
 
-### Kokoro-FastAPI
+### Pocket TTS (serve)
 ```
-KOKORO_BASE_URL=http://localhost:8880
-KOKORO_DEFAULT_VOICE=af_heart
-KOKORO_SPEED=1.0
-KOKORO_RESPONSE_FORMAT=mp3
-KOKORO_MAX_CHUNK_CHARS=2000      # max chars per TTS request; longer text is split into sentence-boundary chunks synthesized one at a time (bounded RAM + per-chunk progress)
+TTS_BASE_URL=http://localhost:8880
+TTS_DEFAULT_VOICE=charles
+TTS_MAX_CHUNK_CHARS=2000         # max chars per TTS request; longer text is split into streamed chunks (sentence + pause-token boundaries; bounded RAM + per-chunk progress)
 ```
+
+There are no speech-rate or audio-format variables: Pocket TTS has no such
+parameters (it streams WAV at 24 kHz mono; the app re-encodes to CBR 64 kbps
+MP3 via lameenc).
 
 ### App
 ```
@@ -33,7 +35,7 @@ DATA_DIR=./data
 EXCLUDE_TAGS=computer,interactive  # comma-separated; client-side filtered (Wallabag API only AND-includes)
 MIN_TEXT_CHARS=200                 # skip articles whose cleaned text is shorter
 MAX_FETCH_PAGES=50                # safety cap when enumerating unread candidates
-EPISODE_GAP_SECONDS=3             # seconds of trailing silence appended to each episode's mp3 (floored to whole 1-second units of the packaged silent asset; 0 disables)
+EPISODE_GAP_SECONDS=3             # seconds of trailing silence appended to each episode's mp3 (floored to whole 1-second units, generated in-process by the same MP3 encoder as speech; 0 disables)
 FEED_TITLE=My Wallabag Podcast   # app BRAND title — shown in the header, footer, and settings page; NOT an RSS feed title. Each podcast feed is titled by its podcast name and served at {BASE_URL}/podcast/{guid}/feed.xml
 LOG_LEVEL=INFO                     # DEBUG/INFO/WARNING/ERROR; controls app + uvicorn loggers; a rotating log file is written to DATA_DIR/logs/wallabag-podcast.log (5MB x3 backups)
 PRONUNCIATIONS=JSON=Jason,SQL=sequel  # comma-separated KEY=SPOKEN pairs; whole-word, case-insensitive rewrites before TTS (empty by default)
@@ -41,7 +43,7 @@ PRONUNCIATIONS=JSON=Jason,SQL=sequel  # comma-separated KEY=SPOKEN pairs; whole-
 
 ## UI-tunable settings (persisted in SQLite `settings` table; override .env defaults at runtime)
 - `articles_per_drive` (int, default 10) — the "Add Random N" count
-- `voice` (str, default = `KOKORO_DEFAULT_VOICE`) — choices fetched live from Kokoro `GET /v1/audio/voices`
+- `voice` (str, default = `TTS_DEFAULT_VOICE`) — choices are the static Pocket TTS `BUILTIN_VOICES` list (21 English built-ins); the settings save validates against it, and `init_db` resets non-empty stored values outside the list back to the default (idempotent, runs on every boot); blank/NULL rows are left as-is and fall back to `TTS_DEFAULT_VOICE` at read time (settings page and generation).
 - `automation_enabled` (bool, false in v1 — UI shows it as "coming soon"/disabled)
 - `automation_time` (str, e.g. "07:00")
 

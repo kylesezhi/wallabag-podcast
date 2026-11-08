@@ -4,16 +4,17 @@ Scope: feature
 
 # Feature: Section Title Pauses
 
-Insert deterministic Kokoro pause tokens around section titles in article bodies — no LLM, regex + BeautifulSoup only.
+Insert deterministic pause tokens around section titles in article bodies — no LLM, regex + BeautifulSoup only.
 
 ## Background
 
 Wallabag returns reader-mode **HTML** in `ArticleFull.content` (app/wallabag.py). Section titles are real heading tags (`h1`–`h6`). Today `_extract_text` flattens all structure with `soup.get_text(separator=" ")`, so headings become indistinguishable from prose.
 
-The `[pause:Xs]` token mechanism already works end-to-end:
+The `[pause:Xs]` token mechanism works end-to-end as **app-side directives**:
 
-- `build_tts_input` emits tokens that the Kokoro-FastAPI server interprets natively.
-- `split_tts_text` never splits inside a token.
+- `build_tts_input` emits tokens; nothing server-side interprets them — they never reach the TTS server.
+- `split_tts_text` fragments text at every token (a token always leads its synthesis chunk).
+- The generation pipeline converts each chunk's leading tokens into generated silence (in-process, same encoder as speech).
 - Pronunciation substitution cannot corrupt tokens.
 
 ## Behavior
@@ -33,9 +34,9 @@ The flattened output then flows through the existing pipeline unchanged (`unesca
 - **Detection:** heading tags only; no bold-paragraph heuristic.
 - **Durations:** fixed module constants (`[pause:1s]` before/after), same style as the hardcoded title/body pauses in `build_tts_input`. No new `Settings`.
 - **Punctuation:** always append a period to heading text.
-- Consecutive headings produce adjacent pause pairs — accepted, Kokoro handles repeated tokens.
+- Consecutive headings produce adjacent pause pairs — accepted; the splitter fragments at every token, so repeated tokens become their own chunks.
 - `min_chars` threshold counts marker characters (~22 per heading) — accepted as negligible.
-- No changes to `kokoro.py`, `pipeline.py`, or `config.py`.
+- No changes to `tts.py`, `pipeline.py`, or `config.py` (the tokens are consumed by the generation pipeline's existing pause handling).
 
 ## Tests
 
@@ -50,4 +51,4 @@ In tests/test_textclean.py:
 
 ## Verification
 
-Run full pytest suite plus repo lint/typecheck (see justfile).
+Run the full pytest suite (`uv run pytest -q` / `mise run test`).

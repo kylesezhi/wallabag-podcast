@@ -21,7 +21,6 @@ dist/
 tests/
 docs/
 reference/
-test-kokoro/
 
 # Secrets — never bake into an image
 .env

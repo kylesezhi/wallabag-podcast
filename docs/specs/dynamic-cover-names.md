@@ -19,7 +19,7 @@ Podcasts are created with random, immutable two-word names (e.g. "Quantum Quokka
 
 ### Font
 - **PixelOperator8-Bold.ttf** (8px-design bold cut — chunkiest 8-bit look), by Jayvee Enaguas (HarvettFox96), **CC0 1.0 public domain**, ~18KB.
-- Committed at `app/assets/fonts/PixelOperator8-Bold.ttf`; loaded via `importlib.resources` (same pattern as `assets/gap_1s.mp3`); `assets/fonts/*.ttf` added to pyproject package-data.
+- Committed at `app/assets/fonts/PixelOperator8-Bold.ttf`; loaded via `importlib.resources`; `assets/fonts/*.ttf` added to pyproject package-data.
 
 ### Rendering (Pillow)
 - **Pillow** added as a main dependency (`pillow>=10`); wheel-based, so the `python:3.12-slim` Docker image needs no system packages.

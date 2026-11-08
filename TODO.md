@@ -1,4 +1,3 @@
-- https://kyutai.org/blog/2026-01-13-pocket-tts/
 - start with 2-minute summary
 - default voice setting for all episodes, but configurable on per ep basis before generation
 - reduce verbose comments in code

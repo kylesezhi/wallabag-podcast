@@ -35,15 +35,20 @@ file: no RSS feed changes, no DB schema changes, no new routes.
   `(tts_text, section_titles)`; the existing `clean_body` /
   `build_tts_input` / `build_tts_input_from_article` delegate and keep their
   signatures).
-- `split_tts_text` forces any sentence CONTAINING the sentinel to begin a
-  new chunk, so every section title aligns with a chunk boundary. (The rule
-  is "contains", not "starts with": consecutive titles leave the mark
-  mid-sentence after the previous title's trailing `[pause:1s]` token.)
-- Chapter start = cumulative float-seconds duration of all prior chunks
-  (`measure_duration_seconds` in app/kokoro.py, mutagen `info.length`),
-  expressed in ms. The sentinel is stripped from chunk text before each
-  Kokoro call and must NEVER reach the TTS server.
-- Episode total duration = `int(sum of per-chunk float durations + gap)`.
+- `split_tts_text` fragments text at every `[pause:Xs]` token, and a
+  token-led fragment always begins a new chunk — so the sentinel (glued to
+  its token) always lands at a chunk start. A fragment carrying the
+  sentinel therefore always begins a chunk too.
+- Chapter start = cumulative float-seconds duration of all prior content
+  (`measure_duration_seconds` in app/tts.py, mutagen `info.length`),
+  expressed in ms — computed BEFORE the chunk's own leading-pause silence,
+  so the pause belongs inside the section's chapter. The sentinel is
+  stripped from chunk text before each TTS call and must NEVER reach the
+  TTS server.
+- Episode total duration = `int(cumulative measured seconds + gap)`, where
+  the silences (pause tokens + end-of-episode gap) generated in-process are
+  included. (Generation no longer appends a separate packaged gap asset;
+  see `docs/specs/episode-end-pause.md`.)
   If any chunk is unparseable (duration `None`) the episode still completes
   with the est-minutes fallback but gets NO chapters (timings unknown).
 
@@ -52,7 +57,10 @@ file: no RSS feed changes, no DB schema changes, no new routes.
 - `write_id3_chapters(path, chapters, total_ms)` in app/chapters.py writes
   an ordered top-level CTOC frame (`toc`, children `chp0..chpN`) plus one
   CHAP frame per chapter (start ms, end = next start or total_ms, TIT2
-  sub-frame carrying the title) via mutagen.id3.
+  sub-frame carrying the title) via mutagen.id3. Generated MP3s come from
+  lameenc and therefore carry no ID3 header; the writer starts from an
+  empty tag in that case (`ID3NoHeaderError` → `ID3()`), so chapters embed
+  on every fresh episode.
 - It runs after the atomic `.part` → `{id}.mp3` rename and before
   `set_episode_done`. The ID3v2 tag sits at the head of the file, so
   byte-range streaming of `/audio/{id}.mp3` is unaffected and the feed

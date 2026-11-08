@@ -25,10 +25,10 @@ Scope: repo
 
 ## Failure recording contract
 - `episodes.error` keeps a SHORT, user-facing reason (terse for the queue UI):
-  - `KokoroError`/`WallabagError` → `str(exc)`.
+  - `TTSError`/`WallabagError` → `str(exc)`.
   - Unexpected `Exception` → `f"Unexpected: {type(exc).__name__}: {exc}"` trimmed to ~200 chars.
   - `SkipArticle` → `f"Skipped: {exc}"`; cancellation → `"Cancelled by user"`.
-- The FULL traceback is written to the log file via `logger.exception(...)` (unexpected) or `logger.error(..., exc_info=True)` (Kokoro/Wallabag) — never stored in the DB.
+- The FULL traceback is written to the log file via `logger.exception(...)` (unexpected) or `logger.error(..., exc_info=True)` (TTS/Wallabag) — never stored in the DB.
 - Failure logs include chunk position read from the persisted `progress_done`/`progress_total` row ("failed at chunk X/Y").
 
 ## Lifecycle logging (INFO)

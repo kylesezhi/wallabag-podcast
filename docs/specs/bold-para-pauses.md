@@ -26,7 +26,7 @@ After the h1–h6 wrapping in the heading-preprocessing step:
 - Same `[pause:1s]` before/after constants as headings; always append terminal period.
 - Empty/whitespace-only bold paragraphs are skipped.
 - Bold paragraphs inside removed containers (nav/footer/table/…) never reach this step.
-- No new Settings entries; no changes to kokoro.py, pipeline.py, or config.py.
+- No new Settings entries; no changes to `tts.py`, `pipeline.py`, or `config.py` (the tokens are consumed by the generation pipeline's existing pause handling).
 
 ## Tests (tests/test_textclean.py, section 9b)
 
@@ -39,4 +39,4 @@ After the h1–h6 wrapping in the heading-preprocessing step:
 
 ## Verification
 
-`just test` (full pytest suite). Repo has no lint/typecheck recipes.
+`uv run pytest -q` (full suite; the repo's toolchain is mise/uv).

@@ -8,7 +8,8 @@ Scope: repo
 - **Language:** Python 3.11+
 - **Web framework:** FastAPI + Uvicorn (ASGI)
 - **Templating:** Jinja2 (server-rendered) + a small hand-written `static/js/app.js` for interactivity + a small hand-written CSS
-- **HTTP client:** httpx (async) for Wallabag and Kokoro
+- **HTTP client:** httpx (async) for Wallabag and Pocket TTS
+- **MP3 encoding:** lameenc (CBR 64 kbps; speech, pause silence, and gap are all re-encoded/encoded through it)
 - **HTML parsing:** BeautifulSoup4 + lxml
 - **Audio metadata/duration:** mutagen
 - **RSS:** feedgen (podcast RSS 2.0 + iTunes extensions)
@@ -26,9 +27,11 @@ wallabag-podcast/
     db.py            # SQLite connection, schema init, repository functions
     naming.py        # weighted random podcast name generator (pure module)
     wallabag.py      # WallabagClient: oauth, list metadata, get entry, refresh
-    kokoro.py        # KokoroClient: voices, synthesize -> mp3 bytes
-    textclean.py     # HTML -> clean spoken text + intro assembly
-    pipeline.py      # orchestration: queue ops, generate flow
+    tts.py           # TTSClient: synthesize -> mp3 bytes (Pocket TTS), health, encode_silence, BUILTIN_VOICES
+    textclean.py     # HTML -> clean spoken text + intro assembly (+ pause-token placement)
+    pipeline.py      # orchestration: queue ops, generate flow (incl. generated silences + chapters)
+    chapters.py      # ID3v2 chapter embedding (mutagen.id3)
+    covers.py        # per-podcast cover rendering (Pillow)
     rss.py           # build podcast feed from episodes
     logging_setup.py # configure_logging(): console + rotating file under DATA_DIR/logs/
   templates/         # Jinja2: base, index (podcast hub: tabs, hero, episodes, other podcasts, subscription), settings, confirm-delete
@@ -37,17 +40,17 @@ wallabag-podcast/
   tests/             # pytest
   .env.example
   pyproject.toml
-  docker-compose.yml # app + kokoro-fastapi-cpu
+  docker-compose.yml # app + pocket-tts (built locally via Dockerfile.tts: pinned pocket-tts + CPU-only torch)
   README.md
 ```
 
 ## Conventions
-- **Secrets** (Wallabag creds, Kokoro URL, BASE_URL) live ONLY in .env / env vars — never in the DB or UI.
+- **Secrets** (Wallabag creds, TTS server URL, BASE_URL) live ONLY in .env / env vars — never in the DB or UI.
 - **Tunables** (articles_per_drive, voice, schedule placeholder) are editable in the UI, persisted in the SQLite `settings` table, and override .env defaults at runtime.
 - **Long-running generation** runs as a single asyncio task (handle on `app.state.generation_task`; flag on `app.state.generating`; owning podcast on `app.state.generating_podcast_id`). Only one run exists at a time and it processes only the triggering podcast's staged episodes, while the busy state shows on every podcast. Progress + per-item status are written to SQLite and the UI polls `/queue/status`.
-- **No mutation of Wallabag state.** All "processed" tracking is local (SQLite `processed_articles` index).
+- **No automatic mutation of Wallabag state.** The only Wallabag write is the explicit Archive action (`archive_item` marks the article read); all queue/processed tracking is local (SQLite `processed_articles` index).
 - **Per-podcast RSS feeds** — each podcast is addressed by its GUID at `{BASE_URL}/podcast/{guid}/feed.xml`: the channel is titled by the podcast name, the id/self link is the GUID URL, and the alternate link is the hub page. The legacy global `{BASE_URL}/feed.xml` route is removed (404); `FEED_TITLE` is the app brand (header/footer/settings), never a feed title.
 - **Bind to 127.0.0.1 by default** (local network only; no auth on feed or UI in v1). BASE_URL is configurable so a phone on the same LAN can reach enclosure URLs.
-- **Chunked TTS generation** — each episode's TTS input is split client-side into sentence-boundary chunks (max `KOKORO_MAX_CHUNK_CHARS` chars); chunks are synthesized one at a time and appended straight to `data/audio/{id}.mp3.part`, so only one chunk's audio is ever in RAM and long articles cannot exhaust memory. The finished part file is atomically renamed to `{id}.mp3`; per-chunk progress is persisted for the UI.
+- **Chunked TTS generation with client-side pauses** — each episode's TTS input is split client-side into chunks bounded by both sentence boundaries and pause tokens (every `[pause:Xs]` token leads its own chunk; max `TTS_MAX_CHUNK_CHARS` chars). The pipeline turns each chunk's leading tokens into generated silence (encoded in-process by lameenc, the same encoder as speech) and synthesizes the chunk's remaining spoken text one at a time, appending straight to `data/audio/{id}.mp3.part`, so only one chunk's audio is ever in RAM and long articles cannot exhaust memory. The finished part file (including the end-of-episode gap silence) is atomically renamed to `{id}.mp3`; per-chunk progress is persisted for the UI.
 - **Logging** — `configure_logging()` runs once in `lifespan()` (after `init_db`): console + a `RotatingFileHandler` at `DATA_DIR/logs/wallabag-podcast.log` (5 MB × 3 backups; `DATA_DIR` is volume-mounted so logs survive container restarts). `LOG_LEVEL` (default INFO) governs root/`app`/`uvicorn`; `uvicorn.access` is quieted to WARNING. Per-episode failures store a short reason in `episodes.error` (queue UI) and write the full traceback to the log file; run start/finish and per-episode start/done are logged at INFO.
-- **Tests:** pytest, httpx mock transports for Wallabag/Kokoro, sample Wallabag HTML fixtures for the cleaner.
+- **Tests:** pytest, httpx mock transports for Wallabag/Pocket TTS, sample Wallabag HTML fixtures for the cleaner.

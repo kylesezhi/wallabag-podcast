@@ -16,7 +16,7 @@ A user can stop a generation run that is in progress (aborting the in-flight TTS
 **Single mechanism: asyncio task cancellation.** No flags, no events.
 
 - Generation runs as a real `asyncio.Task` (via `asyncio.create_task`), with its handle stored on `app.state.generation_task`. It is NOT scheduled via FastAPI `BackgroundTasks` (which exposes no cancellable handle).
-- Stopping = `app.state.generation_task.cancel()`. This injects `asyncio.CancelledError` at the next `await` inside `generate_all()` — i.e. at the slow/hung `await kokoro_client.synthesize(...)` (or `await wallabag_client.get_entry(...)`).
+- Stopping = `app.state.generation_task.cancel()`. This injects `asyncio.CancelledError` at the next `await` inside `generate_all()` — i.e. at the slow/hung `await tts_client.synthesize(...)` (or `await wallabag_client.get_entry(...)`).
 - `generate_all()` catches `asyncio.CancelledError` explicitly. (`CancelledError` is a `BaseException`, NOT caught by the existing `except Exception:` clause.) On cancel it:
   1. marks the current (in-flight) episode `failed` with error `"Cancelled by user"`,
   2. increments `summary["failed"]`,
